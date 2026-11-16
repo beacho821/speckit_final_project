@@ -1,0 +1,34 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName PingFang TC
+skinparam componentStyle rectangle
+title 課堂搶答系統｜角色與職責
+actor 老師
+actor 學生組別 as student
+rectangle 本機課堂模擬 {
+  [老師畫面] as t
+  [學生組別畫面] as s
+  [活動與回合管理] as activity
+  [作答驗證與公平順位] as rank
+  [依角色提供進度與結果] as view
+  [學習單辨識與回填] as notes
+  [活動結果匯出] as export
+}
+artifact "Google 來源工作表" as sheet
+artifact "結果 CSV" as csv
+老師 --> t
+student --> s
+t --> activity : 選題、開始、結束
+s --> activity : 送出本組簡答
+activity --> rank : 驗證與排序
+activity --> view : 階段與收件紀錄
+view --> t : 全班即時進度
+view --> s : 本組狀態、結束後全班結果
+t --> notes : 匯入、寫回
+notes --> sheet : 辨識題號、核對填空
+notes --> activity : 提供搶答單位
+activity --> notes : 已結束回合勝組答案
+t --> export : 下載明細
+activity --> export : 已結束回合全班結果
+export --> csv
+@enduml

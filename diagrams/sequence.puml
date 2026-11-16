@@ -1,0 +1,35 @@
+@startuml
+skinparam defaultFontName PingFang TC
+hide footbox
+title 課堂搶答系統｜從開題到回填
+actor 老師
+participant 來源工作表 as sheet
+participant 課堂活動 as act
+actor "甲組（曾勝）" as a
+actor "乙組（未勝）" as b
+老師 -> act : 匯入學習單
+act -> sheet : 辨識題號、填空及題組
+act --> 老師 : 提供題目清單
+老師 -> act : 選題進入準備，再開啟回合
+act --> 老師 : 進行中
+act --> a : 進行中，可填答，滿 3 秒可送
+act --> b : 進行中，可立即送出
+a -> act : 第 2 秒提早送出
+act --> a : 保留草稿並提示等待時間
+b -> act : 完整送出
+act --> b : 本組已收件
+act --> 老師 : 乙組答案與第一順位
+a -> act : 滿 3 秒後完整送出
+act --> a : 本組已收件
+act --> 老師 : 甲組答案與第二順位
+老師 -> act : 結束回合
+act --> 老師 : 最終順位與各組答案
+act --> a : 結束，公布全班結果
+act --> b : 結束，公布全班結果
+老師 -> act : 寫回勝組答案
+act -> sheet : 重核填空對應並寫入乙組答案
+sheet --> act : 寫回結果
+act --> 老師 : 顯示寫回結果
+老師 -> act : 匯出已結束回合
+act --> 老師 : 提供各題各組 CSV
+@enduml
