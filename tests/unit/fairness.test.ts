@@ -7,7 +7,7 @@ import type { FillBlank } from '../../shared/api.js';
 function activityWithPreviousWinner() {
   const activity = createActivity(); activity.groups = [{ id: 'a', name: '甲組' }, { id: 'b', name: '乙組' }];
   const fill: FillBlank = { id: 'f', questionId: '1', mainQuestionId: '1', unitId: 'u1', row: 1, column: 2, originalValue: '', originalType: 'string', identitySource: 'header' };
-  activity.worksheet = { source: { documentId: 'test', sheetId: 1, sheetTitle: '測試', importedAt: 0 }, fills: [fill, { ...fill, id: 'f2', questionId: '2', mainQuestionId: '2', unitId: 'u2' }, { ...fill, id: 'f3', questionId: '3', mainQuestionId: '3', unitId: 'u3' }], units: [{ id: 'u1', name: '1', questionIds: ['1'], fillBlankIds: ['f'] }, { id: 'u2', name: '2', questionIds: ['2'], fillBlankIds: ['f2'] }, { id: 'u3', name: '3', questionIds: ['3'], fillBlankIds: ['f3'] }] };
+  activity.worksheet = { source: { kind: 'google', documentId: 'test', sheetId: 1, sheetTitle: '測試', importedAt: 0 }, fills: [fill, { ...fill, id: 'f2', questionId: '2', mainQuestionId: '2', unitId: 'u2' }, { ...fill, id: 'f3', questionId: '3', mainQuestionId: '3', unitId: 'u3' }], units: [{ id: 'u1', name: '1', questionIds: ['1'], fillBlankIds: ['f'] }, { id: 'u2', name: '2', questionIds: ['2'], fillBlankIds: ['f2'] }, { id: 'u3', name: '3', questionIds: ['3'], fillBlankIds: ['f3'] }] };
   const first = prepareRound(activity, 'u1'); startRound(activity, first.id, 0);
   submitAnswers(activity, first.id, 'a', [{ questionId: '1', text: '答' }], 0); endRound(activity, first.id);
   return activity;
@@ -36,7 +36,7 @@ describe('公平順位開放時間', () => {
   it('第一回合無人作答時，下一回合仍讓所有組別立即送出', () => {
     const activity = createActivity(); activity.groups = [{ id: 'a', name: '甲組' }, { id: 'b', name: '乙組' }];
     const fill: FillBlank = { id: 'f1', questionId: '1', mainQuestionId: '1', unitId: 'u1', row: 1, column: 1, originalValue: '', originalType: 'blank', identitySource: 'header' };
-    activity.worksheet = { source: { documentId: 'test', sheetId: 1, sheetTitle: '測試', importedAt: 0 }, fills: [fill, { ...fill, id: 'f2', questionId: '2', mainQuestionId: '2', unitId: 'u2' }], units: [{ id: 'u1', name: '1', questionIds: ['1'], fillBlankIds: ['f1'] }, { id: 'u2', name: '2', questionIds: ['2'], fillBlankIds: ['f2'] }] };
+    activity.worksheet = { source: { kind: 'google', documentId: 'test', sheetId: 1, sheetTitle: '測試', importedAt: 0 }, fills: [fill, { ...fill, id: 'f2', questionId: '2', mainQuestionId: '2', unitId: 'u2' }], units: [{ id: 'u1', name: '1', questionIds: ['1'], fillBlankIds: ['f1'] }, { id: 'u2', name: '2', questionIds: ['2'], fillBlankIds: ['f2'] }] };
     const prior = prepareRound(activity, 'u1'); startRound(activity, prior.id, 0); endRound(activity, prior.id);
     const next = prepareRound(activity, 'u2'); startRound(activity, next.id, 700);
     expect(next.openAtByGroup).toEqual({ a: 700, b: 700 });

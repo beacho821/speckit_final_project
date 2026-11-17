@@ -11,9 +11,9 @@ let root: Root | undefined; let host: HTMLDivElement | undefined;
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(async () => { if (root) await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined; vi.restoreAllMocks(); });
 
-async function mount() {
+async function mount(view: ActivityView = baseView) {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  await act(async () => root!.render(<StudentRound session={session} credential="alpha" onExpired={() => undefined} />));
+  await act(async () => root!.render(<StudentRound session={session} credential="alpha" view={view} onExpired={() => undefined} />));
   for (let count = 0; count < 30 && !host.querySelector('textarea'); count += 1) await new Promise(resolve => setTimeout(resolve, 10));
 }
 
@@ -41,7 +41,8 @@ describe('學生作答互動', () => {
     });
     const submit = [...host!.querySelectorAll('button')].find(button => button.textContent?.includes('送出本組答案'))!;
     await act(async () => { submit.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
-    expect(host!.textContent).toContain('本組答案已收件');
+    await act(async()=>root!.render(<StudentRound session={session} credential="alpha" view={{...baseView,received:true,ownAnswers:[{questionId:'1（1）',text:'CPU'}]}}/>));
+    expect(submitted).toBe(true); expect(host!.textContent).toContain('本組答案已收件'); expect(host!.querySelector('textarea')).toBeNull();
   });
   it('缺答時指出題號並保留已填草稿，不顯示收件成功', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -60,3 +61,5 @@ describe('學生作答互動', () => {
     expect(host!.textContent).toContain('1（2）尚未填答'); expect(first.value).toBe('保留的答案'); expect(host!.textContent).not.toContain('本組答案已收件');
   });
 });
+
+it('送答回應遺失只重讀快照，不自動重送；另一畫面收件後停用修改',async()=>{const refresh=vi.fn(),fetch=vi.spyOn(globalThis,'fetch').mockRejectedValue(new TypeError());await mount();await act(async()=>root!.render(<StudentRound session={session} credential="alpha" view={baseView} refresh={refresh}/>));const button=[...host!.querySelectorAll('button')].find(b=>b.textContent==='送出本組答案')!;await act(async()=>button.click());expect(host!.textContent).toContain('送出結果待確認');expect(refresh).toHaveBeenCalledOnce();expect(fetch).toHaveBeenCalledOnce();await act(async()=>root!.render(<StudentRound session={session} credential="alpha" view={{...baseView,received:true,ownAnswers:[{questionId:'1（1）',text:'另一畫面的答案'}]}}/>));expect(host!.textContent).toContain('另一畫面的答案');expect(host!.querySelector('textarea')).toBeNull();expect(fetch).toHaveBeenCalledOnce();});

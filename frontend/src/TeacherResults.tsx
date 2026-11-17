@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import type { SessionResponse } from '../../shared/api';
+import type { SessionResponse, WorksheetSource } from '../../shared/api';
 import { activityHeaders, readError } from './api';
 
-export default function TeacherResults({ session, credential }: { session: SessionResponse; credential: string }) {
+export default function TeacherResults({ session, credential, source }: { session: SessionResponse; credential: string; source?: WorksheetSource }) {
   const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false);
   const [conflicts, setConflicts] = useState<Array<{ questionId: string; currentValue: string; winningAnswer: string }>>([]);
   async function writeback() {
@@ -25,5 +25,5 @@ export default function TeacherResults({ session, credential }: { session: Sessi
     } catch { setMessage('下載失敗，請確認連線後重試。'); }
     finally { setBusy(false); }
   }
-  return <section className="round-panel"><p className="eyebrow">課後整理</p><h2>回填與匯出</h2><p className="muted">回填前會重新比對每個題號與原稿內容；衝突時整批不寫入。回填期間請暫停共同編輯。</p><div className="actions-row"><button className="secondary-button" disabled={busy} onClick={() => void writeback()}>將勝組答案回填原稿</button><button className="primary" disabled={busy} onClick={() => void download()}>下載活動 CSV</button></div>{message && <p className="muted" role="status">{message}</p>}{conflicts.map(conflict => <article className="conflict-card" key={conflict.questionId}><strong>{conflict.questionId}</strong><p>原稿目前內容：{conflict.currentValue}</p><p>勝組答案：{conflict.winningAnswer}</p></article>)}</section>;
+  return <section className="round-panel"><p className="eyebrow">課後整理</p><h2>回填與匯出</h2><p className="muted">回填前會重新比對每個題號與原稿內容；衝突時整批不寫入。回填期間請暫停共同編輯。</p>{source?.kind === 'xlsx' && <p className="muted">本機 XLSX 學習單不支援回填原檔，請下載活動 CSV。</p>}<div className="actions-row"><button className="secondary-button" disabled={busy || source?.kind === 'xlsx'} onClick={() => void writeback()}>將勝組答案回填原稿</button><button className="primary" disabled={busy} onClick={() => void download()}>下載活動 CSV</button></div>{message && <p className="muted" role="status">{message}</p>}{conflicts.map(conflict => <article className="conflict-card" key={conflict.questionId}><strong>{conflict.questionId}</strong><p>原稿目前內容：{conflict.currentValue}</p><p>勝組答案：{conflict.winningAnswer}</p></article>)}</section>;
 }

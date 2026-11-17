@@ -77,6 +77,7 @@ async function loadCurrentSource(config: AppConfig, documentId: string, sheetId:
 }
 
 export async function writebackToGoogle(activity: Activity, config: AppConfig, rounds = activity.rounds) {
+  if(activity.worksheet?.source.kind==='xlsx')throw new DomainError(409,'WRITEBACK_NOT_SUPPORTED','本機 XLSX 學習單不支援回填原檔，請下載活動 CSV。');
   const endedRounds = rounds.filter(round => round.phase === 'ended');
   if (!endedRounds.length) throw new DomainError(409, 'NO_ENDED_ROUNDS', '尚無已結束回合，請先結束一題後再回填。');
   if (!activity.worksheet) throw new DomainError(409, 'WORKSHEET_REQUIRED', '尚未匯入學習單，無法回填。');

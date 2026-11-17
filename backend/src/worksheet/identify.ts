@@ -4,7 +4,20 @@ import type { BuzzerUnit, FillBlank } from '../../../shared/api.js';
 import { DomainError } from '../rounds.js';
 
 export interface IdentifiedWorksheet { fills: FillBlank[]; units: BuzzerUnit[] }
-const textOf = (value: unknown) => typeof value === 'object' && value && 'text' in value ? String((value as { text: unknown }).text) : value == null ? '' : String(value);
+export const textOf = (value: unknown): string => {
+  if (value == null) return '';
+  if (typeof value !== 'object') return String(value);
+  if ('formula' in value || 'sharedFormula' in value) return '';
+  if ('richText' in value && Array.isArray(value.richText)) return value.richText.map(part => part.text ?? '').join('');
+  if ('text' in value) return String(value.text);
+  return '';
+};
+const noteOf = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'texts' in value && Array.isArray(value.texts)) return value.texts.map(textOf).join('');
+  return '';
+};
+const isFormula = (value: unknown) => Boolean(value && typeof value === 'object' && ('formula' in value || 'sharedFormula' in value));
 const clean = (value: string) => value.replace(/[\s　]+/g, '').trim();
 const markerPattern = /^(?:答案|填空)\s*[:：]\s*([^/／]+)\s*[/／]\s*(.+)$/;
 const notePattern = /課堂搶答\s*[:：]\s*([^/／\r\n]+)\s*[/／]\s*([^\r\n]+)/;
@@ -21,36 +34,32 @@ export function parseQuestion(raw: string, inferredSub?: string) {
 }
 
 export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, string> = new Map()): IdentifiedWorksheet {
-  const mergedMaster = new Map<string, ExcelJS.Cell>();
-  for (let row = 1; row <= sheet.rowCount; row += 1) for (let column = 1; column <= sheet.columnCount; column += 1) {
-    const cell = sheet.getCell(row, column);
-    if (cell.isMerged) mergedMaster.set(`${row}:${column}`, cell.master);
-  }
-  const cellValue = (row: number, col: number) => {
-    const master = mergedMaster.get(`${row}:${col}`);
-    return textOf((master ?? sheet.getCell(row, col)).value);
-  };
+  const master = (row: number, column: number) => sheet.getCell(row,column).master;
+  const cellValue = (row: number, col: number) => textOf(master(row,col).value);
   let headerRow = 0, questionColumn = 0, answerColumn = 0;
-  for (let row = 1; row <= sheet.rowCount; row += 1) {
-    const columns = sheet.getRow(row).values as unknown[];
-    for (let col = 1; col < columns.length; col += 1) {
-      const label = clean(textOf(columns[col]));
-      if (/^(題號|題目號|題號編號)$/.test(label)) questionColumn = col;
-      if (/^(作答|答案|填答)$/.test(label)) answerColumn = col;
-    }
-    if (questionColumn && answerColumn) { headerRow = row; break; }
-    questionColumn = 0; answerColumn = 0;
-  }
+  sheet.eachRow(row => {
+    if (headerRow) return;
+    let q=0,a=0;
+    row.eachCell(cell => {
+      if (cell.address !== cell.master.address) return;
+      const label=clean(textOf(cell.value));
+      if (/^(題號|題目號|題號編號)$/.test(label)) q=cell.fullAddress.col;
+      if (/^(作答|答案|填答)$/.test(label)) a=cell.fullAddress.col;
+    });
+    if(q&&a){headerRow=row.number;questionColumn=q;answerColumn=a;}
+  });
 
   const fills: FillBlank[] = [];
   const unitMap = new Map<string, BuzzerUnit>();
   const seenQuestions = new Set<string>();
+  const seenTargets = new Set<string>();
   let currentMain = '';
   const startRow = headerRow ? headerRow + 1 : 1;
   for (let rowNumber = startRow; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
     const questionRaw = questionColumn ? cellValue(rowNumber, questionColumn).trim() : '';
-    const answerCell = answerColumn ? sheet.getCell(rowNumber, answerColumn) : undefined;
+    const answerCell = answerColumn ? master(rowNumber, answerColumn) : undefined;
+    if (questionColumn && isFormula(master(rowNumber,questionColumn).value)) throw new DomainError(422,'FORMULA_IDENTITY','題號不能使用公式，請改為明確文字或數字。');
     const answerRaw = answerCell ? cellValue(rowNumber, answerColumn) : '';
     const cells = row.values as unknown[];
     let markedCell: ExcelJS.Cell | undefined;
@@ -59,10 +68,11 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
     let markedNote = '';
     let targetNote = '';
     for (let column = 1; column < cells.length; column += 1) {
-      const cell = sheet.getCell(rowNumber, column);
+      const cell = master(rowNumber,column);
+      if(cell.fullAddress.row !== rowNumber || cell.fullAddress.col !== column) continue;
       const cellText = textOf(cell.value).trim();
-      const note = notes.get(`${rowNumber}:${column}`) ?? (typeof cell.note === 'string' ? cell.note : '');
-      if (column === answerColumn) targetNote = note;
+      const note = notes.get(`${rowNumber}:${column}`) ?? noteOf(cell.note);
+      if (cell.address === answerCell?.address) targetNote = note;
       const mark = cellText.match(markerPattern);
       const noteMark = note.match(notePattern);
       if (mark || noteMark) {
@@ -98,13 +108,15 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
       unitName = parsed?.mainQuestionId ?? '';
     }
     if (!parsed || !targetCell || !unitName) continue;
+    if (seenTargets.has(targetCell.address)) continue;
+    seenTargets.add(targetCell.address);
     if (seenQuestions.has(parsed.questionId)) throw new DomainError(422, 'DUPLICATE_QUESTION', `${parsed.questionId} 重複出現，請修正學習單題號。`);
     seenQuestions.add(parsed.questionId);
     const unitId = `unit-${createHash('sha1').update(unitName).digest('hex').slice(0, 10)}`;
     const fillId = `fill-${createHash('sha1').update(`${sheet.name}:${rowNumber}:${targetCell.fullAddress.col}:${parsed.questionId}`).digest('hex').slice(0, 12)}`;
     const value = targetCell.value;
     const fill: FillBlank = {
-      id: fillId, ...parsed, unitId, row: rowNumber, column: targetCell.fullAddress.col,
+      id: fillId, ...parsed, unitId, row: targetCell.fullAddress.row, column: targetCell.fullAddress.col,
       originalValue: value ?? null,
       originalType: value === null || value === undefined ? 'blank' : typeof value === 'object' && 'formula' in value ? 'formula' : typeof value === 'object' && 'richText' in value ? 'richText' : typeof value,
       ...(targetNote || markedNote ? { note: targetNote || markedNote } : {}), identitySource,

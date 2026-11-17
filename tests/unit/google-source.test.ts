@@ -13,7 +13,7 @@ describe('Google 試算表來源驗證', () => {
     expect(() => parseSpreadsheetUrl('https://docs.google.com/spreadsheets/d/abc/edit?gid=-1')).toThrow('非負整數');
   });
   it('Google 帳戶未設定時提供可修正提示，不嘗試讀取輸入網路位址', async () => {
-    const config: AppConfig = { teacherPassword: 'test-teacher-secret', groupCodes: new Map([['a', 'test-group-secret']]), port: 3000 };
+    const config: AppConfig = { teacherPassword: 'test-teacher-secret', port: 3000 };
     await expect(importGoogleWorksheet(config, 'https://docs.google.com/spreadsheets/d/abc/edit')).rejects.toMatchObject({ status: 503, code: 'GOOGLE_NOT_CONFIGURED' });
   });
 });

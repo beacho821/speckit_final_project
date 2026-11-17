@@ -81,6 +81,6 @@ export async function importGoogleWorksheet(config: AppConfig, input: unknown, s
     if (!equal) throw new DomainError(409, 'SHEET_CHANGED', '學習單已變更或 Google 與 XLSX 快照不一致，請重新匯入。', { row: rowNumber, column: columnNumber });
   }));
   const identified = identifyWorksheet(worksheet, notes);
-  const source: WorksheetSource = { documentId, sheetId: selected.sheetId, sheetTitle: selected.title, importedAt: Date.now() };
+  const source: WorksheetSource = { kind: 'google', documentId, sheetId: selected.sheetId, sheetTitle: selected.title, importedAt: Date.now() };
   return { worksheet: { source, ...identified } };
 }

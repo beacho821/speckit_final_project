@@ -1,0 +1,2 @@
+import type {Worksheet} from '../../shared/api';
+export const worksheet:Worksheet={source:{kind:'google',documentId:'isolated',sheetId:1,sheetTitle:'題組',importedAt:1},fills:['1（1）','1（2）'].map((questionId,i)=>({id:`f${i}`,questionId,mainQuestionId:'1',subQuestionId:String(i+1),unitId:'u',row:2+i,column:2,originalValue:null,originalType:'blank',identitySource:'header'})),units:[{id:'u',name:'題組',questionIds:['1（1）','1（2）'],fillBlankIds:['f0','f1']}]};

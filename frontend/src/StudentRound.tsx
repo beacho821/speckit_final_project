@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { SessionResponse } from '../../shared/api';
+import type { ActivityView, SessionResponse } from '../../shared/api';
 import { activityHeaders, readError } from './api';
-import { useActivityView } from './useActivityView';
 import RoundHistory from './RoundHistory';
 
-export default function StudentRound({ session, credential, onExpired }: { session: SessionResponse; credential: string; onExpired: () => void }) {
-  const { view, error: syncError } = useActivityView(session, credential, onExpired);
+export default function StudentRound({ session, credential, view, syncError = '', refresh, onExpired }: { session: SessionResponse; credential: string; view: ActivityView|null; syncError?: string; blocked?: boolean; refresh?: () => void; onExpired?: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -23,8 +21,8 @@ export default function StudentRound({ session, credential, onExpired }: { sessi
     setBusy(true); setError('');
     try {
       const response = await fetch(`/api/rounds/${view.roundId}/submissions`, { method: 'POST', headers: { ...activityHeaders(session, credential), 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: view.unit.questionIds.map(questionId => ({ questionId, text: drafts[questionId] ?? '' })) }) });
-      if (!response.ok) setError((await readError(response)).message);
-    } catch { setError('連線中斷，答案草稿已保留，請重新連線後再送出。'); }
+      if (!response.ok) { const issue=await readError(response); if(response.status===401||issue.code==='ACTIVITY_EXPIRED')onExpired?.(); else setError(issue.message); } else refresh?.();
+    } catch { setError('送出結果待確認，草稿已保留；請等待同步收件狀態，不會自動重送。'); refresh?.(); }
     finally { setBusy(false); }
   }
   if (!view) return <section className="round-panel"><h2>學生作答</h2><p className="muted">{syncError || '正在連線並取得課堂狀態…'}</p></section>;

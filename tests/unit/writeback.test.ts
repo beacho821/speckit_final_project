@@ -7,7 +7,7 @@ import type { FillBlank, Worksheet } from '../../shared/api.js';
 function completedActivity() {
   const activity = createActivity(); activity.groups = [{ id: 'a', name: '甲組' }, { id: 'b', name: '乙組' }];
   const fills: FillBlank[] = [1, 2].map((num, index) => ({ id: `f${num}`, questionId: `${num}`, mainQuestionId: `${num}`, unitId: 'u', row: index + 2, column: 3, originalValue: '', originalType: 'string', identitySource: 'header' }));
-  activity.worksheet = { source: { documentId: 'local', sheetId: 1, sheetTitle: '樣本', importedAt: 0 }, fills, units: [{ id: 'u', name: '題組', questionIds: ['1', '2'], fillBlankIds: ['f1', 'f2'] }] };
+  activity.worksheet = { source: { kind: 'google', documentId: 'local', sheetId: 1, sheetTitle: '樣本', importedAt: 0 }, fills, units: [{ id: 'u', name: '題組', questionIds: ['1', '2'], fillBlankIds: ['f1', 'f2'] }] };
   const round = prepareRound(activity, 'u'); startRound(activity, round.id, 0);
   submitAnswers(activity, round.id, 'a', [{ questionId: '1', text: '=文字' }, { questionId: '2', text: '答案,含逗號' }], 0); endRound(activity, round.id);
   return activity;

@@ -6,7 +6,7 @@ import type { FillBlank } from '../../shared/api.js';
 function setup() {
   const activity = createActivity();
   activity.groups = [{ id: 'a', name: '甲組' }, { id: 'b', name: '乙組' }];
-  activity.worksheet = { source: { documentId: 'local-test', sheetId: 1, sheetTitle: '樣本', importedAt: Date.now() }, fills: [], units: [{ id: 'unit', name: '題組', questionIds: ['1（1）', '1（2）'], fillBlankIds: ['f1', 'f2'] }] };
+  activity.worksheet = { source: { kind: 'google', documentId: 'local-test', sheetId: 1, sheetTitle: '樣本', importedAt: Date.now() }, fills: [], units: [{ id: 'unit', name: '題組', questionIds: ['1（1）', '1（2）'], fillBlankIds: ['f1', 'f2'] }] };
   activity.worksheet.fills = ['1（1）', '1（2）'].map((questionId, index): FillBlank => ({ id: `f${index + 1}`, questionId, mainQuestionId: '1', subQuestionId: `${index + 1}`, unitId: 'unit', row: index + 1, column: 2, originalValue: null, originalType: 'blank', identitySource: 'header' }));
   const round = prepareRound(activity, 'unit');
   return { activity, round };

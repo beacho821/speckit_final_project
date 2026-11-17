@@ -34,6 +34,7 @@ export function startRound(activity: Activity, roundId: string, now = performanc
   if (activity.groups.length === 0) throw new DomainError(409, 'EMPTY_ROSTER', '尚未加入任何組別，請先設定組別名單。');
   round.phase = 'active'; round.openedAt = now; round.roster = [...activity.groups];
   round.openAtByGroup = openTimes(activity, round, now);
+  if (!activity.rosterLocked) activity.rosterVersion++;
   activity.rosterLocked = true;
   changed(activity);
   return round;

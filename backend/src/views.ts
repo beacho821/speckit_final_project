@@ -14,6 +14,9 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     version: activity.viewVersions[key] ?? 0,
   };
   if (identity.role === 'teacher') {
+    common.rosterVersion = activity.rosterVersion;
+    const worksheet = activity.worksheet;
+    common.worksheetPreview = worksheet ? { source: worksheet.source, mainQuestionCount: new Set(worksheet.fills.map(f => f.mainQuestionId)).size, fillCount: worksheet.fills.length, unitCount: worksheet.units.length, units: worksheet.units.map(u => ({ id: u.id, name: u.name, questionIds: u.questionIds })) } : null;
     common.availableUnits = activity.worksheet?.units.filter(candidate => !activity.rounds.some(item => item.unitId === candidate.id && item.id !== (round?.phase === 'preparing' ? round.id : undefined))).map(candidate => ({ unitId: candidate.id, questionIds: candidate.questionIds })) ?? [];
     common.groups = round?.roster.map(group => {
       const submission = round.submissions.find(item => item.groupId === group.id);
@@ -23,6 +26,7 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     const groupId = identity.groupId!;
     const own = round?.submissions.find(item => item.groupId === groupId);
     common.groupId = groupId;
+    common.groupName = activity.groups.find(g => g.id === groupId)?.name;
     common.received = Boolean(own);
     common.ownAnswers = own?.answers.map(answer => ({ questionId: answer.questionId, text: answer.text }));
     common.waitRemainingMs = round?.phase === 'active' ? remainingWait(round, groupId, now) : 0;

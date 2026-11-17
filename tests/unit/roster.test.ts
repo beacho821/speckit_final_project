@@ -1,0 +1,5 @@
+import {it,expect} from 'vitest';
+import {createActivity} from '../../backend/src/activity';
+import {addGroup,renameGroup,deleteGroup,validateName} from '../../backend/src/roster';
+it('可見字元、空白與拒絕時零寫入',()=>{expect(validateName('  👨‍👩‍👧‍👦  ')).toBe('👨‍👩‍👧‍👦');expect(validateName('é'.repeat(40))).toHaveLength(80);expect(()=>validateName('字'.repeat(41))).toThrow();const a=createActivity();const g=addGroup(a,'甲','secret');expect(()=>addGroup(a,'甲','secret')).toThrow();expect(a.groups).toHaveLength(1);a.rosterLocked=true;expect(()=>renameGroup(a,g.id,'乙')).toThrow();expect(()=>deleteGroup(a,g.id)).toThrow();expect(a.groups[0].name).toBe('甲');});
+it('避開教師密碼與已用碼；刪除不回收',()=>{const a=createActivity();let i=0;const codes=['ABCDEFGH','ABCDEFGH','BCDEFGHJ'];const g=addGroup(a,'甲','ABCDEFGH',()=>codes[i++]);expect(a.joinCodes.get(g.id)).toBe('BCDEFGHJ');deleteGroup(a,g.id);i=0;const next=addGroup(a,'甲','secret',()=>['BCDEFGHJ','CDEFGHJK'][i++]);expect(a.joinCodes.get(next.id)).toBe('CDEFGHJK');expect(a.usedJoinCodes.has('BCDEFGHJ')).toBe(true);});

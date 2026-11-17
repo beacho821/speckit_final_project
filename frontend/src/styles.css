@@ -5,8 +5,6 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input { font: inherit; }
 .shell { width: min(100% - 32px, 920px); margin: 0 auto; padding: 28px 0 48px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .02em; }
-.brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: white; background: #5b55d8; }
 .card { margin: 70px auto 0; padding: 36px; border: 1px solid #e5e8ef; border-radius: 20px; background: white; box-shadow: 0 16px 48px #1b27420d; }
 .login-card { width: min(100%, 460px); }
 .workspace { margin-top: 40px; }
@@ -61,3 +59,9 @@ footer { margin: 20px auto 0; color: #82899a; text-align: center; font-size: .85
 .conflict-card { margin-top: 10px; padding: 12px; border: 1px solid #f0c7a3; border-radius: 10px; background: #fff9f2; }
 .conflict-card p { margin: 6px 0 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .shell { width: min(100% - 24px, 920px); padding-top: 18px; } .card { margin-top: 42px; padding: 24px 20px; } .workspace { margin-top: 24px; } }
+
+button:focus-visible,select:focus-visible { outline: 3px solid #7770e5; outline-offset: 3px; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+.join-code { font-family: ui-monospace, monospace; letter-spacing: .12em; }
+.roster-edit input { width: 100%; padding: 10px; border: 1px solid #dce0e9; border-radius: 9px; }
+@media (max-width: 560px) { .actions-row { flex-direction: column; align-items: stretch; } .roster-edit { flex-wrap: wrap; } .roster-edit input { flex-basis: 100%; } .progress-card > div.roster-edit { flex-wrap: wrap; } .section-heading { gap: 12px; } }

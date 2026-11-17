@@ -5,8 +5,8 @@ import { DomainError } from '../../backend/src/rounds.js';
 import type { AppConfig } from '../../backend/src/config.js';
 import { makeMarkedWorksheet, makeMixedWorksheet, makeSimpleWorksheet } from '../fixtures/guided-notes.js';
 
-const config: AppConfig = { teacherPassword: 'teacher-preview-secret', groupCodes: new Map([['a', 'alpha-preview-secret']]), port: 0 };
-const sourceFor = (documentId: string, sheetId: number, sheetTitle: string) => ({ documentId, sheetId, sheetTitle, importedAt: 1 });
+const config: AppConfig = { teacherPassword: 'teacher-preview-secret', port: 0 };
+const sourceFor = (documentId: string, sheetId: number, sheetTitle: string) => ({ kind: 'google' as const, documentId, sheetId, sheetTitle, importedAt: 1 });
 const { app, activity } = createApp(config, { importWorksheet: async url => {
   const fixture = url === 'single' ? await makeSimpleWorksheet() : url === 'mixed' ? await makeMixedWorksheet() : url === 'moved' ? await makeMarkedWorksheet() : null;
   if (!fixture) throw new DomainError(422, 'INVALID_SHEET_URL', '來源格式錯誤，請修正後重試。');
@@ -39,3 +39,14 @@ describe('樣本學習單匯入入口', () => {
     expect(invalid.status).toBe(422); expect(activity.worksheet).toBe(previous);
   });
 });
+
+it('慢速raw上傳不能覆寫較新Google匯入；成功清準備回合保留名單與成員',async()=>{
+ const {classroom}=await import('../helpers/classroom');const {variant}=await import('../fixtures/xlsx-variants');const {request}=await import('node:http');
+ const c=await classroom({importWorksheet:async url=>({worksheet:{source:{kind:'google',documentId:String(url),sheetId:1,sheetTitle:'隔離來源',importedAt:0},...identifyWorksheet((await makeSimpleWorksheet()).sheet)}})});
+ try{const g=await c.group('甲'),s=await c.student(g.joinCode);await c.request('/worksheet/import',c.teacher,{url:'old'},'POST');const unit=c.activity.worksheet!.units[0];const prepared=await(await c.request('/rounds',c.teacher,{unitId:unit.id},'POST')).json();
+ const bytes=await variant();let upload:ReturnType<typeof request>;const result=new Promise<number>((resolve,reject)=>{upload=request(c.base+'/api/worksheet/import/xlsx',{method:'POST',headers:{...c.teacher,'Content-Type':'application/octet-stream','X-File-Name':'local.xlsx','Content-Length':String(bytes.length)}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode!));});upload.on('error',reject);upload.write(bytes.subarray(0,100));});
+ const generation=c.activity.importGeneration;for(let i=0;i<50&&c.activity.importGeneration===generation;i++)await new Promise(r=>setTimeout(r,5));
+ expect((await c.request('/worksheet/import',c.teacher,{url:'new'},'POST')).status).toBe(200);upload!.end(bytes.subarray(100));expect(await result).toBe(409);expect(c.activity.worksheet!.source).toMatchObject({kind:'google',documentId:'new'});expect(c.activity.rounds).toHaveLength(0);expect((await c.request(`/rounds/${prepared.id}/start`,c.teacher,undefined,'POST')).status).toBe(409);expect(c.activity.joinCodes.get(g.id)).toBe(g.joinCode);expect(c.activity.members.has(s.session.memberId)).toBe(true);
+ }finally{await c.close();}
+});
+it('解析期間先開題則拒絕發布；候選、失敗與已發布但回應遺失皆以最新快照為準',async()=>{const {classroom}=await import('../helpers/classroom');let release:()=>void=()=>{};let entered:()=>void=()=>{};const started=new Promise<void>(r=>{entered=r;});const gate=new Promise<void>(r=>{release=r;});const c=await classroom({importWorksheet:async url=>{if(url==='slow'){entered();await gate;}return{worksheet:{source:{kind:'google',documentId:String(url),sheetId:1,sheetTitle:'隔離',importedAt:0},...identifyWorksheet((await makeSimpleWorksheet()).sheet)}};}});try{await c.group('甲');await c.request('/worksheet/import',c.teacher,{url:'old'},'POST');const old=c.activity.worksheet;const round=await(await c.request('/rounds',c.teacher,{unitId:old!.units[0].id},'POST')).json();const pending=c.request('/worksheet/import',c.teacher,{url:'slow'},'POST');await started;await c.request(`/rounds/${round.id}/start`,c.teacher,undefined,'POST');release();expect((await pending).status).toBe(409);expect(c.activity.worksheet).toBe(old);const snapshot=await(await c.request('/view')).json();expect(snapshot.worksheetPreview.source.documentId).toBe('old');}finally{release();await c.close();}});

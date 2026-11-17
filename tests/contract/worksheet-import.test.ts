@@ -4,8 +4,8 @@ import { DomainError } from '../../backend/src/rounds.js';
 import type { AppConfig } from '../../backend/src/config.js';
 import type { Worksheet } from '../../shared/api.js';
 
-const config: AppConfig = { teacherPassword: 'teacher-import-secret', groupCodes: new Map([['a', 'alpha-import-secret']]), port: 0 };
-const worksheet: Worksheet = { source: { documentId: 'doc-test', sheetId: 12, sheetTitle: '樣本頁', importedAt: 1 }, fills: [], units: [{ id: 'u1', name: '第 1 題', questionIds: ['1'], fillBlankIds: [] }] };
+const config: AppConfig = { teacherPassword: 'teacher-import-secret', port: 0 };
+const worksheet: Worksheet = { source: { kind: 'google', documentId: 'doc-test', sheetId: 12, sheetTitle: '樣本頁', importedAt: 1 }, fills: [], units: [{ id: 'u1', name: '第 1 題', questionIds: ['1'], fillBlankIds: [] }] };
 const { app, activity } = createApp(config, { importWorksheet: async (url, sheetId) => {
   if (url === 'multi' && sheetId === undefined) return { candidates: [{ sheetId: 12, title: '樣本頁' }, { sheetId: 13, title: '備用頁' }] };
   if (url === 'broken') throw new DomainError(502, 'GOOGLE_READ_FAILED', '無法讀取試算表，請檢查權限。');
