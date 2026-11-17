@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+:root { font-family: Inter, "Noto Sans TC", system-ui, sans-serif; color: #172033; background: #f7f8fa; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+.shell { width: min(100% - 32px, 920px); margin: 0 auto; padding: 28px 0 48px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .02em; }
+.brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: white; background: #5b55d8; }
+.card { margin: 70px auto 0; padding: 36px; border: 1px solid #e5e8ef; border-radius: 20px; background: white; box-shadow: 0 16px 48px #1b27420d; }
+.login-card { width: min(100%, 460px); }
+.workspace { margin-top: 40px; }
+.eyebrow { margin: 0 0 8px; color: #6a63d9; font-size: .76rem; font-weight: 700; letter-spacing: .1em; }
+h1 { margin: 0; font-size: clamp(1.5rem, 5vw, 2rem); letter-spacing: -.035em; }
+h2 { margin: 0; font-size: 1.1rem; }
+.muted { color: #737b8d; line-height: 1.6; }
+.role-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 5px; margin: 26px 0 22px; border-radius: 12px; background: #f1f2f7; }
+.role-switch button, .quiet { border: 0; color: #657084; background: transparent; cursor: pointer; }
+.role-switch button { padding: 10px; border-radius: 9px; }
+.role-switch button.active { color: #242050; background: white; box-shadow: 0 2px 7px #18213a12; }
+.form-stack { display: grid; gap: 12px; margin-top: 22px; }
+.form-stack label { font-size: .9rem; font-weight: 650; }
+.form-stack input, .form-stack textarea { width: 100%; padding: 12px 13px; border: 1px solid #dce0e9; border-radius: 10px; background: white; outline: none; }
+.form-stack input:focus, .form-stack textarea:focus { border-color: #7770e5; box-shadow: 0 0 0 3px #7770e51c; }
+.primary { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; color: white; background: #5b55d8; font-weight: 700; cursor: pointer; }
+.primary:disabled { opacity: .55; cursor: wait; }
+.error { margin: 0; color: #b42338; font-size: .9rem; }
+footer { margin: 20px auto 0; color: #82899a; text-align: center; font-size: .85rem; }
+.quiet { margin-left: auto; padding: 8px 12px; }
+.roster-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #eef0f4; }
+.badge { padding: 4px 8px; border-radius: 999px; color: #267250; background: #e9f7ef; font-size: .78rem; }
+.notice { margin-top: 22px; padding: 16px; border-radius: 12px; color: #454e63; background: #f4f5fa; line-height: 1.6; }
+.round-panel { margin-top: 28px; padding-top: 24px; border-top: 1px solid #e9ebf1; }
+.section-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.phase-badge { padding: 6px 10px; border-radius: 999px; color: #5850c9; background: #efefff; font-size: .75rem; font-weight: 750; }
+.form-stack select { width: 100%; padding: 12px; border: 1px solid #dce0e9; border-radius: 10px; background: white; }
+.question-chip { display: inline-flex; margin: 16px 0; padding: 8px 12px; border-radius: 9px; color: #3f3a9b; background: #f0efff; font-weight: 700; }
+.group-progress, .answer-list, .results-list { display: grid; gap: 10px; margin: 18px 0; }
+.progress-card, .results-list article { padding: 14px; border: 1px solid #e7e9ef; border-radius: 12px; background: #fcfcfd; }
+.progress-card > div { display: flex; justify-content: space-between; gap: 8px; }
+.status { color: #858c9c; font-size: .84rem; }
+.status.received { color: #267250; font-weight: 700; }
+.progress-card p, .results-list p { display: flex; gap: 12px; margin: 8px 0 0; color: #444d60; overflow-wrap: anywhere; }
+.progress-card p span { color: #7770d9; font-weight: 700; }
+.answer-list label { display: grid; gap: 8px; font-weight: 700; }
+.answer-list textarea { width: 100%; padding: 12px; border: 1px solid #dce0e9; border-radius: 10px; resize: vertical; }
+.success-box { margin: 18px 0; padding: 14px; border-radius: 10px; color: #267250; background: #e9f7ef; }
+.danger-button { width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 10px; color: white; background: #bc3547; font-weight: 700; cursor: pointer; }
+.preview-summary { display: grid; gap: 10px; margin-top: 18px; padding: 14px; border: 1px solid #e7e9ef; border-radius: 12px; background: #fcfcfd; }
+.preview-summary > span { color: #626b7e; font-size: .9rem; }
+.preview-summary > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.preview-chip { padding: 6px 9px; border-radius: 8px; color: #3e3a90; background: #f0efff; font-size: .85rem; }
+.roster-edit, .add-group, .actions-row { display: flex; align-items: center; gap: 8px; }
+.roster-edit input, .add-group select { flex: 1; min-width: 0; }
+.remove-button, .secondary-button { padding: 10px 12px; border: 1px solid #dce0e9; border-radius: 9px; color: #444d60; background: #fff; cursor: pointer; }
+.remove-button { color: #ad3342; }
+.secondary-button:disabled { opacity: .5; cursor: not-allowed; }
+.actions-row > * { flex: 1; }
+.history-question { margin-top: 12px; padding-top: 10px; border-top: 1px solid #eceef3; }
+.history-question p { overflow-wrap: anywhere; }
+.conflict-card { margin-top: 10px; padding: 12px; border: 1px solid #f0c7a3; border-radius: 10px; background: #fff9f2; }
+.conflict-card p { margin: 6px 0 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .shell { width: min(100% - 24px, 920px); padding-top: 18px; } .card { margin-top: 42px; padding: 24px 20px; } .workspace { margin-top: 24px; } }

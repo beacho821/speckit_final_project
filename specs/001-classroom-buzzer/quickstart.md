@@ -62,4 +62,20 @@ React 組件案例可單獨執行 `npm exec -- vitest run tests/components/Stude
 
 ## 交付紀錄
 
-記錄實際執行的命令、通過與失敗數、失敗原因、三份學習單對照結果與五回合最慢同步時間。授權 Google 副本的人工回填與本機替身測試須分別記錄。最後逐項比對[組件圖](../../diagrams/component.puml)、[類別圖](../../diagrams/class.puml)與時序圖，核對角色、階段轉換、資料關係及收件順序。
+### 本機實作紀錄（2026-11-16）
+
+| 項目 | 實際結果 |
+| --- | --- |
+| Node.js / npm | Node.js v26.13.1；npm v12.2.2。此工作階段直接使用 nvm 安裝目錄中的 Node，系統 shim 仍指向未安裝版本。 |
+| `npm ci` | 通過；353 個套件安裝，360 個套件稽核。 |
+| `npm run typecheck` | 通過；前端與後端 TypeScript 均無錯誤。 |
+| `npm test` | 通過；15 個測試檔、43 個測試案例。包含登入／名單 HTTP 契約、樣本匯入預覽、回合收件、權限隔離、公平時限、React 學生送出、CSV 與回填計畫。 |
+| `npm run build` | 通過；Vite 8.3.8 產出前端，後端 TypeScript 編譯成功。 |
+| `npm start` | 通過啟動；服務回報監聽 `127.0.0.1:3000`。本機測試環境無法由另一個命令程序連入 loopback；API 已由測試程序中的真實 HTTP 案例驗證。 |
+| `npm outdated --include=dev` | 通過，沒有過期依賴。 |
+| `npm audit` | 0 漏洞。ExcelJS 的舊版 uuid 相依已透過 npm override 升至修補版。 |
+| 三種樣本預覽 | 本機 ExcelJS fixtures 經 HTTP 匯入入口比對：單題 6 單位／6 格；混合版 4 單位／6 格；分散標記版 4 單位／6 格。 |
+| 同步延遲 | 合約案例量測回合結束到等待中的授權畫面更新，小於 1 秒。五回合、多畫面長時間量測尚未執行。 |
+| Google 實際連線與寫回 | 未執行。此環境未設定 `GOOGLE_SERVICE_ACCOUNT_JSON`，也未提供可編輯教師副本；Google API 權限、真實 Sheets 快照與實際回填需在具備帳戶設定後驗收。 |
+
+本機自動化案例使用執行期假憑證，不會將憑證寫入建置檔、日誌或測試輸出。正式啟動前仍須由作業系統環境設定 `TEACHER_PASSWORD` 與 `GROUP_CODES_JSON`；Google 匯入／回填另須設定 `GOOGLE_SERVICE_ACCOUNT_JSON`。PlantUML 圖的角色、活動、回合、學習單與匯出職責已對照程式模組；真實 Google 回填順序尚待教師副本實測。
