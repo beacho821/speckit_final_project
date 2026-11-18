@@ -1,19 +1,27 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, cp, symlink, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdtemp, cp, writeFile, rm } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { basic } from '../helpers/classroom.js';
 
 let child: ChildProcess | undefined, folder: string | undefined;
-afterEach(async () => { if (child && child.exitCode === null) { child.kill('SIGTERM'); await new Promise(resolve => child!.once('exit', resolve)); } if (folder) await rm(folder, { recursive: true, force: true }); child = undefined; folder = undefined; });
+async function removeFixture() {
+  if (!folder) return;
+  const root = resolve(process.cwd()), target = resolve(folder);
+  if (!target.startsWith(`${root}${sep}.tmp-classroom-dev-`)) throw new Error('拒絕移除專案目錄外的測試資料。');
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try { await rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); return; }
+    catch (error) { if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '') || attempt === 9) throw error; await new Promise(resolveDelay => setTimeout(resolveDelay, 100)); }
+  }
+}
+async function stopChild(signal: NodeJS.Signals = 'SIGTERM') { const processToStop = child; if (!processToStop || processToStop.exitCode !== null || processToStop.signalCode !== null) return; const exited = new Promise<void>(resolveExit => processToStop.once('exit', () => resolveExit())); processToStop.kill(signal); await exited; }
+afterEach(async () => { await stopChild(); await removeFixture(); child = undefined; folder = undefined; });
 async function freePort() { const s = createServer(); s.listen(0, '127.0.0.1'); await new Promise<void>(r => s.once('listening', r)); const port = (s.address() as { port: number }).port; await new Promise<void>(r => s.close(() => r())); return port; }
 async function launch(filePassword?: string, externalPassword?: string, occupied?: {api?:number;vite?:number}) {
-  folder = await mkdtemp(join(tmpdir(), 'classroom-dev-'));
+  folder = await mkdtemp(join(process.cwd(), '.tmp-classroom-dev-'));
   for (const item of ['backend','shared','frontend','scripts','package.json','vite.config.ts']) await cp(join(process.cwd(), item), join(folder, item), { recursive: true });
-  await symlink(join(process.cwd(), 'node_modules'), join(folder, 'node_modules'));
   const apiPort = occupied?.api ?? await freePort(), port = occupied?.vite ?? await freePort();
   if (filePassword) await writeFile(join(folder, '.env'), `TEACHER_PASSWORD=${filePassword}\nPORT=${apiPort}\n`);
   const env = { ...process.env, PORT: String(apiPort), GROUP_CODES_JSON: '舊錯誤值' }; delete env.GOOGLE_SERVICE_ACCOUNT_JSON;
@@ -46,7 +54,7 @@ describe('單指令開發啟動', () => {
 it('API或Vite連接埠衝突會非零退出並清理已開服務',async()=>{
  for(const kind of ['api','vite'] as const){
  const blocker=createServer();blocker.listen(0,'127.0.0.1');await new Promise<void>(r=>blocker.once('listening',r));const port=(blocker.address() as {port:number}).port;
- try{const run=await launch(undefined,randomUUID(),{[kind]:port});expect(child!.exitCode).not.toBeNull();expect(child!.exitCode).not.toBe(0);expect(run.output()).not.toContain('課堂活動已啟動');if(kind==='vite')await expect(fetch(`http://127.0.0.1:${run.apiPort}`)).rejects.toThrow();}finally{await new Promise<void>(r=>blocker.close(()=>r()));if(folder)await rm(folder,{recursive:true,force:true});folder=undefined;child=undefined;}
+ try{const run=await launch(undefined,randomUUID(),{[kind]:port});expect(child!.exitCode).not.toBeNull();expect(child!.exitCode).not.toBe(0);expect(run.output()).not.toContain('課堂活動已啟動');if(kind==='vite')await expect(fetch(`http://127.0.0.1:${run.apiPort}`)).rejects.toThrow();}finally{await new Promise<void>(r=>blocker.close(()=>r()));await removeFixture();folder=undefined;child=undefined;}
  }
 },30000);
-it('SIGINT清埠且再次啟動產生不同活動ID',async()=>{const password=randomUUID();const one=await launch(undefined,password);const headers={Authorization:basic('teacher',password)};const first=await(await fetch(one.url+'/api/sessions',{method:'POST',headers})).json();child!.kill('SIGINT');await new Promise(r=>child!.once('exit',r));await expect(fetch(`http://127.0.0.1:${one.apiPort}`)).rejects.toThrow();await rm(folder!,{recursive:true,force:true});const two=await launch(undefined,password);const second=await(await fetch(two.url+'/api/sessions',{method:'POST',headers})).json();expect(second.activityId).not.toBe(first.activityId);},30000);
+it('SIGINT清埠且再次啟動產生不同活動ID',async()=>{const password=randomUUID();const one=await launch(undefined,password);const headers={Authorization:basic('teacher',password)};const first=await(await fetch(one.url+'/api/sessions',{method:'POST',headers})).json();child!.kill('SIGINT');await new Promise(r=>child!.once('exit',r));await expect(fetch(`http://127.0.0.1:${one.apiPort}`)).rejects.toThrow();await removeFixture();folder=undefined;child=undefined;const two=await launch(undefined,password);const second=await(await fetch(two.url+'/api/sessions',{method:'POST',headers})).json();expect(second.activityId).not.toBe(first.activityId);},30000);

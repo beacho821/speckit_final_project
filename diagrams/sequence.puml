@@ -1,35 +1,78 @@
 @startuml
 skinparam defaultFontName PingFang TC
 hide footbox
-title 課堂搶答系統｜從開題到回填
-actor 老師
-participant 來源工作表 as sheet
-participant 課堂活動 as act
-actor "甲組（曾勝）" as a
-actor "乙組（未勝）" as b
-老師 -> act : 匯入學習單
-act -> sheet : 辨識題號、填空及題組
-act --> 老師 : 提供題目清單
-老師 -> act : 選題進入準備，再開啟回合
-act --> 老師 : 進行中
-act --> a : 進行中，可填答，滿 3 秒可送
-act --> b : 進行中，可立即送出
-a -> act : 第 2 秒提早送出
-act --> a : 保留草稿並提示等待時間
-b -> act : 完整送出
-act --> b : 本組已收件
-act --> 老師 : 乙組答案與第一順位
-a -> act : 滿 3 秒後完整送出
-act --> a : 本組已收件
-act --> 老師 : 甲組答案與第二順位
-老師 -> act : 結束回合
-act --> 老師 : 最終順位與各組答案
-act --> a : 結束，公布全班結果
-act --> b : 結束，公布全班結果
-老師 -> act : 寫回勝組答案
-act -> sheet : 重核填空對應並寫入乙組答案
-sheet --> act : 寫回結果
-act --> 老師 : 顯示寫回結果
-老師 -> act : 匯出已結束回合
-act --> 老師 : 提供各題各組 CSV
+title 開課設定、匯入與加入流程：時序圖
+actor 專題成員 as developer
+participant 開發啟動 as startup
+participant 課堂活動 as activity
+actor 老師 as teacher
+participant "組別與加入驗證" as join
+actor 學生 as student
+participant "學習單匯入" as importer
+developer -> startup : 執行 npm run dev
+startup -> startup : 讀根目錄設定，外部值優先
+alt 必要設定缺少
+  startup --> developer : 指出變數與設定方式，不揭露值
+else 必要設定完整
+  startup -> activity : 啟動可操作的空白新活動
+  teacher -> join : 以教師密碼登入
+  join --> teacher : 進入老師工作台
+  teacher -> join : 新增甲組
+  join -> activity : 建立組別與唯一加入碼
+  join --> teacher : 顯示甲組與加入碼
+  student -> join : 輸入加入碼與名稱
+  alt 加入碼或名稱無效
+    join --> student : 指出問題，不新增成員
+  else 有效
+    join -> activity : 記錄所屬組別與名稱
+    join --> student : 顯示本人名稱與甲組
+    join --> teacher : 甲組已加入名稱
+  end
+  teacher -> importer : 選本機 XLSX 與工作表
+  importer -> importer : 驗證檔案、題號與合併關係
+  alt 驗證未通過或發布前拒絕
+    importer --> teacher : 說明問題，保留原學習單、選題及名單
+  else 匯入成功
+    importer -> activity : 設定學習單與搶答單位
+    importer -> activity : 更換來源時清除舊選題與準備回合，保留名單
+    alt 收到成功回應
+      importer --> teacher : 預覽題號、填空與回合數
+    else 回應遺失，無法判定結果
+      note over teacher : 匯入結果待確認，不自動重送或宣告零寫入
+      teacher -> activity : 不帶 after 重新取得完整快照
+      alt 快照可取得
+        activity --> teacher : 目前來源及選題，不回滾較新更新
+      else 暫時連線中斷
+        note over teacher : 維持待確認，停用再匯入及開題
+      else 授權撤銷或活動過期
+        activity --> teacher : 清除登入，返回加入流程，不重送舊操作
+      end
+    end
+    teacher -> activity : 確認現況後，重新選題並開始首回合
+    activity -> join : 鎖定組別名單
+    student -> activity : 代表甲組完整送答
+    activity --> student : 本組收件結果
+    opt 學生暫時斷線後重連
+      note over join, student : 斷線不移除成員名稱
+      student -> join : 以原身分重新驗證
+      alt 原活動與組別仍有效
+        join -> activity : 查詢目前可見狀態，沿用原成員
+        activity --> student : 目前階段、組別答案與收件狀態
+        note over activity, student : 不重送答案，不新增順位
+      else 活動重啟或組別撤銷
+        join --> student : 拒絕原身分，返回加入流程
+      end
+    end
+    teacher -> activity : 結束回合、匯出結果
+    activity --> teacher : 已結束回合 CSV
+  end
+end
+note over teacher, join
+首回合前刪組即撤銷碼與原存取。
+首回合後拒絕組別增刪與更名。
+end note
+note over importer, activity
+本機來源不需要雲端設定。
+本次僅線上來源可回填原稿。
+end note
 @enduml

@@ -2,33 +2,59 @@
 !pragma layout smetana
 skinparam defaultFontName PingFang TC
 skinparam componentStyle rectangle
-title 課堂搶答系統｜角色與職責
-actor 老師
-actor 學生組別 as student
-rectangle 本機課堂模擬 {
-  [老師畫面] as t
-  [學生組別畫面] as s
-  [活動與回合管理] as activity
-  [作答驗證與公平順位] as rank
-  [依角色提供進度與結果] as view
-  [學習單辨識與回填] as notes
-  [活動結果匯出] as export
+title 開課設定、匯入與加入流程：組件圖
+actor 老師 as teacher
+actor 學生 as student
+artifact "根目錄環境設定" as env
+artifact "本機 XLSX 學習單" as xlsx
+cloud "Google 來源工作表" as google
+artifact "活動結果 CSV" as csv
+rectangle 課堂活動 {
+  [開發啟動與設定檢查] as startup
+  [老師工作台] as teacherView
+  [學生加入與工作台] as studentView
+  [角色與組別存取驗證] as access
+  [組別名單與加入碼管理] as roster
+  [學生名稱與加入紀錄] as members
+  [學習單來源選取與驗證] as source
+  [題號、填空與題組辨識] as parser
+  [活動、回合與組別順位] as activity
+  [結果匯出與線上回填] as results
 }
-artifact "Google 來源工作表" as sheet
-artifact "結果 CSV" as csv
-老師 --> t
-student --> s
-t --> activity : 選題、開始、結束
-s --> activity : 送出本組簡答
-activity --> rank : 驗證與排序
-activity --> view : 階段與收件紀錄
-view --> t : 全班即時進度
-view --> s : 本組狀態、結束後全班結果
-t --> notes : 匯入、寫回
-notes --> sheet : 辨識題號、核對填空
-notes --> activity : 提供搶答單位
-activity --> notes : 已結束回合勝組答案
-t --> export : 下載明細
-activity --> export : 已結束回合全班結果
-export --> csv
+env --> startup : 教師密碼與選用雲端設定
+startup --> access : 已驗證設定
+startup --> activity : 建立空白新活動
+teacher --> teacherView : 教師密碼登入
+student --> studentView : 加入碼與名稱
+teacherView --> access
+studentView --> access
+access --> roster : 核對有效加入碼
+access --> members : 驗證後記錄名稱
+teacherView --> roster : 開題前新增、刪除、查看碼
+roster --> activity : 名單與鎖定狀態
+roster --> access : 刪組撤銷存取
+members --> teacherView : 依組列出本活動曾加入名稱
+studentView --> access : 斷線重連重新驗證原身分
+teacherView --> source : 選來源與工作表
+xlsx --> source : 本機檔案
+google --> source : 既有線上匯入
+source --> parser : 驗證來源內容
+parser --> activity : 完整題號、填空與題組
+teacherView --> activity : 選題、開始、結束
+studentView --> activity : 同組共用首次有效送答
+activity --> results : 已結束回合
+results --> csv
+results --> google : 僅線上來源可回填
+note bottom of source
+驗證或發布前拒絕：本次零寫入。
+回應遺失：待確認，重讀完整快照。
+首回合前成功更換清除舊選題，保留名單。
+首回合後不可重新匯入。
+本次不回填本機 XLSX。
+end note
+note bottom of members
+登出、關閉或斷線不移除名稱。
+重連不重複建立成員或重送答案。
+刪組或活動重啟才清除對應紀錄。
+end note
 @enduml

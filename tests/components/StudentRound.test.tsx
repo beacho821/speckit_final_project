@@ -60,6 +60,21 @@ describe('學生作答互動', () => {
     await act(async () => { submit.click(); await new Promise(resolve => setTimeout(resolve, 10)); });
     expect(host!.textContent).toContain('1（2）尚未填答'); expect(first.value).toBe('保留的答案'); expect(host!.textContent).not.toContain('本組答案已收件');
   });
+
+  it('曾勝組可先填答案，優先時段內拒收仍保留草稿與剩餘時間提示', async () => {
+    const waitingView = { ...baseView, waitRemainingMs: 2999 };
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ code: 'WAIT_REQUIRED', message: '本組尚須等待 2999 毫秒才能送出，答案草稿已保留。', details: { waitRemainingMs: 2999 } }, { status: 409 }));
+    await mount(waitingView);
+    expect(host!.textContent).toContain('本組有優先送出時段');
+    const field = host!.querySelector('textarea')!;
+    await act(async () => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!; setter.call(field, '等待期間先填好的原文'); field.dispatchEvent(new Event('input', { bubbles: true })); });
+    const submit = [...host!.querySelectorAll('button')].find(button => button.textContent?.includes('送出本組答案'))!;
+    await act(async () => { submit.click(); await new Promise(resolve => setTimeout(resolve, 10)); });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(host!.textContent).toContain('答案草稿已保留');
+    expect(field.value).toBe('等待期間先填好的原文');
+    expect(host!.textContent).not.toContain('本組答案已收件');
+  });
 });
 
 it('送答回應遺失只重讀快照，不自動重送；另一畫面收件後停用修改',async()=>{const refresh=vi.fn(),fetch=vi.spyOn(globalThis,'fetch').mockRejectedValue(new TypeError());await mount();await act(async()=>root!.render(<StudentRound session={session} credential="alpha" view={baseView} refresh={refresh}/>));const button=[...host!.querySelectorAll('button')].find(b=>b.textContent==='送出本組答案')!;await act(async()=>button.click());expect(host!.textContent).toContain('送出結果待確認');expect(refresh).toHaveBeenCalledOnce();expect(fetch).toHaveBeenCalledOnce();await act(async()=>root!.render(<StudentRound session={session} credential="alpha" view={{...baseView,received:true,ownAnswers:[{questionId:'1（1）',text:'另一畫面的答案'}]}}/>));expect(host!.textContent).toContain('另一畫面的答案');expect(host!.querySelector('textarea')).toBeNull();expect(fetch).toHaveBeenCalledOnce();});

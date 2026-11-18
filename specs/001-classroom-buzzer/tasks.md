@@ -32,7 +32,7 @@ description: "課堂線上搶答系統的開發任務與獨立驗收條件"
 ### 測試
 
 - [X] T011 [P] [US1] 在 `tests/fixtures/guided-notes.ts` 以 ExcelJS 建立三種版面的 XLSX、對應原稿格值及獨立預期題號表。在 `tests/unit/worksheet-parser.test.ts` 驗證三種正例，另測跨空行誤接子題、重複題號、歧義、零填空與合併格重算。
-- [ ] T012 [P] [US1] 在 `tests/contract/worksheet-import.test.ts` 以可控 Google 回應測 POST /worksheet/import：指定 gid、多分頁待選、單頁自選、錯誤網址、失權、XLSX 與 Sheets 快照不一致、學生越權及舊請求晚到。失敗時原預覽必須完整。
+- [X] T012 [P] [US1] 在 `tests/contract/worksheet-import.test.ts` 以可控 Google 回應測 POST /worksheet/import：指定 gid、多分頁待選、單頁自選、錯誤網址、失權、XLSX 與 Sheets 快照不一致、學生越權及舊請求晚到。失敗時原預覽必須完整。
 
 ### 實作
 
@@ -60,7 +60,7 @@ description: "課堂線上搶答系統的開發任務與獨立驗收條件"
 - [X] T023 [US2] 在 `backend/src/app.ts` 掛載 /rounds、/:id/start、/:id/submissions、/:id/end（後三者接在 /rounds 下）、/view 與回合結果端點。驗證身分、輸入與階段，學生收件僅回 roundId 與 received。
 - [X] T024 [US2] 在 `frontend/src/useActivityView.ts` 接通單一分頁長輪詢：首次取得完整快照、無變更續等、斷線顯示中文並重連、登入失效回登入畫面。拒收或同步更新時保留目前回合的學生草稿。
 - [X] T025 [US2] 在 `frontend/src/TeacherRound.tsx`、`frontend/src/StudentRound.tsx`、`frontend/src/App.tsx` 接通教師自登入後快照選題、開關回合與名單鎖定，學生依完整題號填寫簡答。按角色呈現本組確認、教師全班即時進度及結束後的歷次結果。
-- [ ] T026 [US2] 在 `tests/integration/classroom.test.ts` 以真實 HTTP 演練一位老師與三組學生，驗證雙子題同收、缺答修正、並發先後、晚到組別、重連與重啟，加測首回合結束、教師重開分頁登入、無須重匯即可開第二回合。在 `tests/components/StudentRound.test.tsx` 用 Vitest 實際掛載 React 組件，模擬輸入並按送出：完整答案顯示收件確認；缺一格則指明題號、保留已填原文且沒有成功收件。依 `specs/001-classroom-buzzer/quickstart.md` 的單檔指令重跑，另以多分頁核對隔離。
+- [X] T026 [US2] 在 `tests/integration/classroom.test.ts` 以真實 HTTP 演練一位老師與三組學生，驗證雙子題同收、缺答修正、並發先後、晚到組別、重連與重啟，加測首回合結束、教師重開分頁登入、無須重匯即可開第二回合。在 `tests/components/StudentRound.test.tsx` 用 Vitest 實際掛載 React 組件，模擬輸入並按送出：完整答案顯示收件確認；缺一格則指明題號、保留已填原文且沒有成功收件。依 `specs/001-classroom-buzzer/quickstart.md` 的單檔指令重跑，另以多分頁核對隔離。
 
 ## 階段五　US3 公平送出時間與順位（P1）
 
@@ -70,13 +70,13 @@ description: "課堂線上搶答系統的開發任務與獨立驗收條件"
 ### 測試
 
 - [X] T027 [P] [US3] 在 `tests/unit/fairness.test.ts` 以可控時鐘驗證第一回合、未勝組、曾勝組的兩側臨界值、全組皆曾勝、無人送出歷程，以及新活動資格重算。
-- [ ] T028 [P] [US3] 在 `tests/contract/fair-submissions.test.ts` 以已知勝出歷程測送出及快照契約：提前拒收只回本組剩餘毫秒，零新增順位；到時首次有效者取得整組第一。測近乎同時送出、重新登入與用戶端偽造時間。
+- [X] T028 [P] [US3] 在 `tests/contract/fair-submissions.test.ts` 以已知勝出歷程測送出及快照契約：提前拒收只回本組剩餘毫秒，零新增順位；到時首次有效者取得整組第一。測近乎同時送出、重新登入與用戶端偽造時間。
 
 ### 實作
 
 - [X] T029 [US3] 在 `backend/src/fairness.ts` 從已結束回合推算各組曾否勝出，開題時凍結各組開放時刻。有未勝組時曾勝組延後 3,000 毫秒，全組皆曾勝時立即開放。比較採後端單調時鐘的「大於或等於」。
 - [X] T030 [US3] 在 `backend/src/rounds.ts` 的同步收件步驟先核對資格，再編號；在 `backend/src/views.ts` 提供本組 waitRemainingMs。已結束回合的順位與開題資格快照不得因重連或後續勝負而改變。
-- [ ] T031 [US3] 在 `frontend/src/StudentRound.tsx` 顯示本組規則與剩餘等待時間。等待時仍可填答，提前送出的草稿保留，開放時更新操作；重跑 T027、T028 與課堂演練中「乙先送」和「乙未送」兩種結果。
+- [X] T031 [US3] 在 `frontend/src/StudentRound.tsx` 顯示本組規則與剩餘等待時間。等待時仍可填答，提前送出的草稿保留，開放時更新操作；重跑 T027、T028 與課堂演練中「乙先送」和「乙未送」兩種結果。
 
 ## 階段六　US4 勝組回填與全班 CSV（P2）
 
@@ -85,9 +85,9 @@ description: "課堂線上搶答系統的開發任務與獨立驗收條件"
 
 ### 測試
 
-- [ ] T032 [P] [US4] 在 `tests/contract/writeback.test.ts` 驗證 POST /worksheet/writeback 對勝組、未結束與無勝組的處理；測未授權、無已結束回合、移欄、刪格、同格衝突、同時回填、無編輯權、回應遺失後重試及結果核對。分別斷言提交前發現衝突時寫入批次零次，以及提交後讀回受外部編輯影響時回 WRITEBACK_UNCONFIRMED、寫入批次僅一次。
+- [X] T032 [P] [US4] 在 `tests/contract/writeback.test.ts` 驗證 POST /worksheet/writeback 對勝組、未結束與無勝組的處理；測未授權、無已結束回合、移欄、刪格、同格衝突、同時回填、無編輯權、回應遺失後重試及結果核對。分別斷言提交前發現衝突時寫入批次零次，以及提交後讀回受外部編輯影響時回 WRITEBACK_UNCONFIRMED、寫入批次僅一次。
 - [X] T033 [P] [US4] 在 `tests/contract/results-csv.test.ts` 驗證 GET /results.csv 的權限、檔名、UTF-8 欄名、排序、15 筆資料及無已結束回合的拒絕。讀回含引號、逗號、換行及等號的簡答，檢查未送出組答案與順位為空。
-- [ ] T034 [P] [US4] 在 `tests/integration/writeback-identity.test.ts` 以可控 Sheets 測試替身驗證首次寫入、移欄及再匯入均可重辨混合版六格。覆蓋公式原值、形似標記的答案、既有備註、非目標格、合併與格式。
+- [X] T034 [P] [US4] 在 `tests/integration/writeback-identity.test.ts` 以可控 Sheets 測試替身驗證首次寫入、移欄及再匯入均可重辨混合版六格。覆蓋公式原值、形似標記的答案、既有備註、非目標格、合併與格式。
 
 ### 實作
 
@@ -95,14 +95,14 @@ description: "課堂線上搶答系統的開發任務與獨立驗收條件"
 - [X] T036 [US4] 在 `backend/src/worksheet/google-source.ts`、`backend/src/worksheet/writeback.ts` 組成單次 spreadsheets.batchUpdate，將原文寫為 stringValue；必要時在同格附加一次識別備註並保留原有文字。提交後重新辨識並核對，差異或讀回失敗時回報待確認及相關題號，不自動重送或回滾。老師重試時重新讀取並完整比對；所有返回路徑均釋放寫回執行權。
 - [X] T037 [US4] 在 `backend/src/results-csv.ts` 由封存結果產生「題號、組別、答案、搶答順位、作答狀態」五欄。每填空乘固定名單各一列，依回合、題號原序、有效順位及未送出名單序排列，保留答案原文並正確跳脫。
 - [X] T038 [US4] 在 `backend/src/app.ts` 掛載回填與下載端點，在 `frontend/src/TeacherResults.tsx`、`frontend/src/App.tsx` 提供教師操作。呈現已寫入、已相符、無勝組、衝突與結果待確認，提示寫回期間暫停共編，支援處理後重試與 CSV 下載。
-- [ ] T039 [US4] 在 `tests/integration/results.test.ts` 從已結束回合走完兩個正式 HTTP 入口，比對同一份封存結果的勝組原文、子題順位、未送出組、四格更新與 15 筆 CSV；再次寫回不可重複附加備註或改動其他格。
+- [X] T039 [US4] 在 `tests/integration/results.test.ts` 從已結束回合走完兩個正式 HTTP 入口，比對同一份封存結果的勝組原文、子題順位、未送出組、四格更新與 15 筆 CSV；再次寫回不可重複附加備註或改動其他格。
 
 ## 階段七　整體驗收與交付
 
-- [ ] T040 [P] 在 `tests/integration/privacy.test.ts` 以執行期虛構機敏值驗證正常與錯誤路徑的日誌、例外、前端建置檔及未授權回應無真值；遍歷學生無權使用的教師操作，核對各入口保密、輸入驗證與正體中文回饋。
+- [X] T040 [P] 在 `tests/integration/privacy.test.ts` 以執行期虛構機敏值驗證正常與錯誤路徑的日誌、例外、前端建置檔及未授權回應無真值；遍歷學生無權使用的教師操作，核對各入口保密、輸入驗證與正體中文回饋。
 - [ ] T041 [P] 在 `tests/integration/sync.test.ts` 驗證一師三組五回合的授權更新與未授權事件零洩漏。按 `specs/001-classroom-buzzer/quickstart.md` 的瀏覽器演練量測操作被接受至各授權畫面呈現的最慢時間，須在 1 秒內（SC-002）。
 - [ ] T042 依 `specs/001-classroom-buzzer/quickstart.md` 使用可編輯的 Google 教師副本實際走完三種版面與完整課堂流程，核對權限失敗、人工改值衝突、移欄、回填後重讀、CSV、重啟後外部成果仍保留。在該文件交付紀錄分列實測與替身結果（SC-001、SC-004、SC-005）。
-- [ ] T043 核對 `diagrams/component.puml`、`diagrams/class.puml`、`diagrams/sequence.puml` 與實際模組、資料關係及開題至回填順序。依 `package-lock.json` 執行 npm ci、npm outdated --include=dev 並複核最新穩定版，執行 npm run typecheck、npm test、npm run build、npm start。在 `specs/001-classroom-buzzer/quickstart.md` 記錄指令、通過與失敗數、最慢同步時間、差異及未執行原因，通過必要案例才勾選交付。
+- [X] T043 核對 `diagrams/component.puml`、`diagrams/class.puml`、`diagrams/sequence.puml` 與實際模組、資料關係及開題至回填順序。依 `package-lock.json` 執行 npm ci、npm outdated --include=dev 並複核最新穩定版，執行 npm run typecheck、npm test、npm run build、npm start。在 `specs/001-classroom-buzzer/quickstart.md` 記錄指令、通過與失敗數、最慢同步時間、差異及未執行原因，通過必要案例才勾選交付。
 
 ## 相依順序與平行範例
 
@@ -129,8 +129,17 @@ US1 + US2 + US3 + US4 → 整體驗收
 
 ## Phase 8: Convergence
 
-- [ ] T044 為 `backend/src/worksheet/google-source.ts` 建立可控制的 Google API 測試替身，驗證 `tests/unit/google-source.test.ts` 與 `tests/contract/worksheet-import.test.ts` 涵蓋分頁 metadata、指定 gid、多分頁選擇、格值與備註轉換、XLSX／Sheets 快照差異、權限及匯出大小錯誤；以三種 fixture 對照題號與填空結果（FR-002、SC-001，partial）。
-- [ ] T045 擴充 `tests/integration/classroom.test.ts`，以真實 HTTP 演練老師及三組完成至少五回合，涵蓋不同組別勝出、晚加入組別、教師重新登入後直接開下一題、學生重連、逾時前後與並發送出；逐次驗證結果隔離及授權畫面更新在 1 秒內（FR-004、FR-007、FR-008、SC-002、SC-003，partial）。
-- [ ] T046 擴充 `tests/contract/fair-submissions.test.ts` 與 `tests/components/StudentRound.test.tsx`，使用可控時鐘驗證曾勝組剩餘等待、提早送出被拒且順位不變、答案草稿保留、滿 3 秒可送，以及所有組都曾勝時立即開放（FR-006、SC-003，partial）。
-- [ ] T047 新增 `tests/integration/writeback-identity.test.ts` 與 `tests/integration/results.test.ts` 的可控 Sheets API 測試，驗證混合版移欄後以題號重辨、單次 `batchUpdate`、字串原文與識別備註、衝突零寫入、讀回待確認不重送、重試冪等，並比對相同封存回合的 CSV、勝組與未送出列（FR-009、FR-010、SC-004，partial）。
-- [ ] T048 新增 `tests/integration/privacy.test.ts`，使用執行期虛構憑證檢查學生存取教師端點、錯誤登入、撤銷組別、匯入／回填錯誤等路徑的回應、日誌與建置產物；確認不洩漏憑證或他組資料，並驗證拒絕操作不改變活動狀態、中文提示可供修正（FR-011、憲章「機敏資料保護／功能測試」，partial）。
+- [X] T044 為 `backend/src/worksheet/google-source.ts` 建立可控制的 Google API 測試替身，驗證 `tests/unit/google-source.test.ts` 與 `tests/contract/worksheet-import.test.ts` 涵蓋分頁 metadata、指定 gid、多分頁選擇、格值與備註轉換、XLSX／Sheets 快照差異、權限及匯出大小錯誤；以三種 fixture 對照題號與填空結果（FR-002、SC-001，partial）。
+- [X] T045 擴充 `tests/integration/classroom.test.ts`，以真實 HTTP 演練老師及三組完成至少五回合，涵蓋不同組別勝出、晚加入組別、教師重新登入後直接開下一題、學生重連、逾時前後與並發送出；逐次驗證結果隔離及授權畫面更新在 1 秒內（FR-004、FR-007、FR-008、SC-002、SC-003，partial）。
+- [X] T046 擴充 `tests/contract/fair-submissions.test.ts` 與 `tests/components/StudentRound.test.tsx`，使用可控時鐘驗證曾勝組剩餘等待、提早送出被拒且順位不變、答案草稿保留、滿 3 秒可送，以及所有組都曾勝時立即開放（FR-006、SC-003，partial）。
+- [X] T047 新增 `tests/integration/writeback-identity.test.ts` 與 `tests/integration/results.test.ts` 的可控 Sheets API 測試，驗證混合版移欄後以題號重辨、單次 `batchUpdate`、字串原文與識別備註、衝突零寫入、讀回待確認不重送、重試冪等，並比對相同封存回合的 CSV、勝組與未送出列（FR-009、FR-010、SC-004，partial）。
+- [X] T048 新增 `tests/integration/privacy.test.ts`，使用執行期虛構憑證檢查學生存取教師端點、錯誤登入、撤銷組別、匯入／回填錯誤等路徑的回應、日誌與建置產物；確認不洩漏憑證或他組資料，並驗證拒絕操作不改變活動狀態、中文提示可供修正（FR-011、憲章「機敏資料保護／功能測試」，partial）。
+
+## Phase 9: Convergence
+
+- [X] T049 建立 `tests/integration/sync.test.ts`，以一師三組五回合驗證長輪詢只通知具授權角色、未授權事件零洩漏，並量測各授權畫面在接受操作後 1 秒內更新（SC-002、FR-008；partial）。
+- [ ] T050 取得可編輯的 Google 教師副本後，依 `specs/001-classroom-buzzer/quickstart.md` 執行三種版面與完整課堂端到端驗收，記錄真實權限失敗、衝突、移欄、回填重讀、CSV 與重啟保存結果；目前僅有替身覆蓋，無法證明外部流程（SC-001、SC-004、SC-005；partial）。
+## Phase 10: Convergence
+
+- [ ] T051 依 `specs/001-classroom-buzzer/quickstart.md` 以實際桌面瀏覽器開啟教師及三組學生分頁，完成五回合授權同步演練；逐次量測操作接受至各授權分頁畫面呈現的最慢時間，記錄實測值並確認均小於 1 秒（SC-002；partial，HTTP 長輪詢測試不代表瀏覽器畫面呈現）。
+- [ ] T052 取得可編輯的 Google 教師副本及服務帳戶設定後，完成三種版面及整堂課的真實 Google 匯入、人工改值衝突、移欄回填重讀、CSV 與重啟保存驗收，並將實測與替身結果分開記錄（SC-001、SC-004、SC-005；partial，目前只有 Google API 替身測試）。

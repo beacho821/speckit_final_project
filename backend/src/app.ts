@@ -15,6 +15,7 @@ import { addGroup, renameGroup, deleteGroup, joinMember, rosterFor } from './ros
 export interface AppServices {
   importWorksheet?: (url: unknown, sheetId?: number) => Promise<ImportResult>;
   writeback?: (rounds: import('../../shared/api.js').Round[]) => Promise<{ written: string[]; alreadyMatched: string[]; noWinner: string[] }>;
+  now?: () => number;
 }
 
 export function createApp(config: AppConfig, services: AppServices = {}) {
@@ -87,7 +88,7 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
     catch (error) { domainError(res, error); }
   });
   app.post('/api/rounds/:id/start', ...teacherAuth, (req, res) => {
-    try { res.json(startRound(activity, String(req.params.id))); }
+    try { res.json(startRound(activity, String(req.params.id), services.now?.())); }
     catch (error) { domainError(res, error); }
   });
   app.post('/api/rounds/:id/end', ...teacherAuth, (req, res) => {
@@ -96,7 +97,7 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
   });
   app.post('/api/rounds/:id/submissions', authenticate(config, activity), (req, res) => {
     if (req.identity?.role !== 'student') return res.status(403).json({ code: 'FORBIDDEN', message: '此操作僅限學生組別使用。' });
-    try { submitAnswers(activity, String(req.params.id), req.identity.groupId!, req.body?.answers); res.status(201).json({ roundId: req.params.id, received: true }); }
+    try { submitAnswers(activity, String(req.params.id), req.identity.groupId!, req.body?.answers, services.now?.()); res.status(201).json({ roundId: req.params.id, received: true }); }
     catch (error) { domainError(res, error); }
   });
   app.get('/api/rounds/:id/results', authenticate(config, activity), (req, res) => {
@@ -107,14 +108,14 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
   });
   app.get('/api/view', authenticate(config, activity), async (req, res) => {
     const identity = req.identity!;
-    let view = makeView(activity, identity);
+    let view = makeView(activity, identity, services.now?.());
     const after = Number(req.query.after);
     if (Number.isFinite(after) && after === view.version) {
       const deadline = Date.now() + 20_000;
       while (Date.now() < deadline && !req.aborted) {
         await new Promise(resolve => setTimeout(resolve, 100));
         if (identity.role === 'student' && !activity.groups.some(group => group.id === identity.groupId)) return res.status(401).json({ code: 'ACCESS_REVOKED', message: '組別授權已移除，請重新向老師確認名單。' });
-        view = makeView(activity, identity);
+        view = makeView(activity, identity, services.now?.());
         if (view.version !== after) break;
       }
       if (req.aborted) return;

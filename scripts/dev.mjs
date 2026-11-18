@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const typescriptPackage = dirname(fileURLToPath(import.meta.resolve('typescript')));
+const tsc = resolve(typescriptPackage, '../bin/tsc');
 process.chdir(root);
 let api, vite, compiler;
 let stopping = false;
@@ -16,7 +19,7 @@ async function close() {
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void close().finally(() => process.exit(0)); });
 try {
   await new Promise((resolve, reject) => {
-    compiler = spawn(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'backend/tsconfig.json'], { cwd: root, stdio: 'inherit' });
+    compiler = spawn(process.execPath, [tsc, '-p', 'backend/tsconfig.json'], { cwd: root, stdio: 'inherit' });
     compiler.once('error', reject);
     compiler.once('exit', code => code === 0 ? resolve() : reject(new Error('後端編譯失敗，請修正型別錯誤後再啟動。')));
   });
