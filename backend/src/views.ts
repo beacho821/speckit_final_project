@@ -4,8 +4,8 @@ import { currentRound, finalCorrectness, remainingWait, reviewFor } from './roun
 import type { Identity } from './access.js';
 import { previewQuestion } from './questions.js';
 
-export function makeView(activity: Activity, identity: Identity, now = performance.now()): ActivityView {
-  const round = currentRound(activity);
+export function makeView(activity: Activity, identity: Identity, now = performance.now(), retainReceipt = false): ActivityView {
+  const round = currentRound(activity) ?? (retainReceipt && identity.role === 'student' ? activity.rounds.at(-1) : undefined);
   const unit = round && activity.units.find(item => item.id === round.unitId);
   const key = identity.role === 'teacher' ? 'teacher' : `student:${identity.groupId}`;
   const hideQuestionDetails = identity.role === 'student' && round?.phase === 'preparing';
@@ -21,6 +21,7 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     version: activity.viewVersions[key] ?? 0,
   };
   if (identity.role === 'teacher') {
+    if (activity.writebackInProgress) common.writebackInProgress = true;
     common.rosterVersion = activity.rosterVersion;
     common.worksheetPreview = previewFor(activity);
     common.availableUnits = activity.units
@@ -30,7 +31,7 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     if (round?.phase === 'reviewing') common.review = reviewFor(round);
     common.groups = round?.roster.map(group => {
       const submission = round.submissions.find(item => item.groupId === group.id);
-      return { id: group.id, name: group.name, received: Boolean(submission), ...(submission ? { rank: submission.rank, answers: submission.answers.map(answer => ({
+      return { id: group.id, name: group.name, received: Boolean(submission), ...(submission ? { rank: submission.rank, ...(submission.disqualified ? { disqualified: true } : {}), answers: submission.answers.map(answer => ({
         questionId: answer.questionId,
         text: answer.text,
         ...(round.phase === 'reviewing' ? { autoCorrect: answer.autoCorrect, correct: finalCorrectness(answer) } : {}),
@@ -62,7 +63,7 @@ export function resultsFor(round: Round): RoundResultLine[] | null {
       const answer = submission?.answers.find(item => item.questionId === questionId);
       return {
         groupId: group.id, groupName: group.name, answer: answer?.text ?? '', rank: submission?.rank ?? null,
-        status: submission ? '已送出' : '未送出',
+        status: submission?.disqualified ? '已取消資格' : submission ? '已送出' : '未送出',
         correct: answer ? finalCorrectness(answer) ?? null : null,
       };
     }),

@@ -26,3 +26,9 @@ export function changed(activity: Activity, visibleTo: string[] = ['teacher', ..
   activity.version += 1;
   for (const key of visibleTo) activity.viewVersions[key] = (activity.viewVersions[key] ?? 0) + 1;
 }
+
+export function projectionChanged(activity: Activity, groupId?: string) {
+  for (const key of ['projection', ...(groupId ? [`projection:${groupId}`] : activity.groups.map(group => `projection:${group.id}`))]) {
+    activity.viewVersions[key] = (activity.viewVersions[key] ?? 0) + 1;
+  }
+}

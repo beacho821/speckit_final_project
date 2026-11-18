@@ -1,7 +1,7 @@
 import type { SessionResponse } from '../../shared/api';
 
 export const SESSION_KEY = 'classroom.student';
-export interface SavedStudent { version: 1; activityId: string; joinCode: string; studentName: string; memberId: string }
+export interface SavedStudent { version: 1; activityId: string; classroomId?: string; activityEpoch?: string; joinCode: string; studentName: string; memberId: string }
 
 export function readStudent(): SavedStudent | null {
   try {
@@ -10,6 +10,11 @@ export function readStudent(): SavedStudent | null {
     const saved = JSON.parse(raw);
     if (saved.version !== 1 || !['activityId', 'joinCode', 'studentName', 'memberId'].every(key => typeof saved[key] === 'string' && saved[key])) {
       clearStudent(); return null;
+    }
+    if (saved.classroomId !== undefined || saved.activityEpoch !== undefined) {
+      if (typeof saved.classroomId !== 'string' || !saved.classroomId || typeof saved.activityEpoch !== 'string' || !saved.activityEpoch) {
+        clearStudent(); return null;
+      }
     }
     return saved;
   } catch { clearStudent(); return null; }
@@ -25,6 +30,7 @@ export function saveStudent(session: SessionResponse, joinCode: string) {
   try {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({
       version: 1, activityId: session.activityId, joinCode,
+      ...(session.classroomId && session.activityEpoch ? { classroomId: session.classroomId, activityEpoch: session.activityEpoch } : {}),
       studentName: session.studentName, memberId: session.memberId,
     }));
     return true;

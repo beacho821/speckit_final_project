@@ -1,62 +1,53 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { SessionResponse, RosterResponse } from '../../shared/api';
-import TeacherRound from './TeacherRound';
+import type { SessionResponse } from '../../shared/api';
 import StudentRound from './StudentRound';
-import WorksheetImport from './WorksheetImport';
-import Roster from './Roster';
-import TeacherResults from './TeacherResults';
-import { activityHeaders, basicHeader } from './api';
-import { readStudent, saveStudent, clearStudent } from './session';
+import TeacherPortal from './TeacherWorkspace';
+import { ProjectionEntry, useOpenProjection } from './Projection';
+import { ApiRequestError, basicHeader, readError, requestMessage } from './api';
+import { readStudent, saveStudent, clearStudent, type SavedStudent } from './session';
 import { useActivityView } from './useActivityView';
 
 export default function App() {
+  const path = window.location.pathname;
+  if (path === '/projection' || /^\/teacher\/classrooms\/[^/]+\/projection$/.test(path)) return <ProjectionEntry />;
+  return <ClassroomApp />;
+}
+
+function ClassroomApp() {
   const [role, setRole] = useState<'teacher' | 'student'>('teacher');
   const [credential, setCredential] = useState('');
   const [name, setName] = useState('');
-  const [session, setSession] = useState<SessionResponse | null>(null);
-  const [roster, setRoster] = useState<RosterResponse | null>(null);
+  const [session, setSession] = useState<Extract<SessionResponse, { role: 'student' }> | { role: 'teacher' } | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [unconfirmed, setUnconfirmed] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
+  const [path, setPath] = useState(window.location.pathname);
   const operation = useRef(0);
   const loginRequest = useRef<AbortController | null>(null);
-  const confirmation = useRef(0);
+  const navigate = useCallback((next: string) => {
+    if (window.location.pathname !== next) window.history.pushState(null, '', next);
+    setPath(next);
+  }, []);
+  useEffect(() => {
+    const back = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', back);
+    return () => window.removeEventListener('popstate', back);
+  }, []);
 
   const logout = useCallback(() => {
     operation.current++;
     loginRequest.current?.abort();
     clearStudent();
-    setSession(null); setRoster(null); setCredential(''); setName('');
-    setBusy(false); setRestoring(false); setUnconfirmed(false); setImportBusy(false);
-    setNotice(''); setError('');
-  }, []);
-  const { view, error: syncError, refresh, fullSnapshot } = useActivityView(session, credential, logout);
+    setSession(null); setCredential(''); setName('');
+    setBusy(false); setRestoring(false); setNotice(''); setError('');
+    navigate('/');
+  }, [navigate]);
+  const openProjection = useOpenProjection(credential, session?.role === 'teacher');
+  const { view, error: syncError, refresh, fullSnapshot } = useActivityView(session?.role === 'student' ? session : null, credential, logout);
 
-  useEffect(() => {
-    if (unconfirmed && fullSnapshot > confirmation.current) setUnconfirmed(false);
-  }, [fullSnapshot, unconfirmed]);
-
-  useEffect(() => {
-    if (session?.role !== 'teacher') return;
-    let alive = true;
-    const controller = new AbortController();
-    void fetch('/api/roster', { headers: activityHeaders(session, credential), signal: controller.signal })
-      .then(async response => {
-        const body = await response.json();
-        if (!alive) return;
-        if (response.status === 401 || body.code === 'ACTIVITY_EXPIRED') { logout(); return; }
-        if (!response.ok) throw new Error();
-        setRoster(old => !old || body.rosterVersion >= old.rosterVersion ? body : old);
-      })
-      .catch(() => { if (alive) setError('名單同步失敗，請確認連線。'); });
-    return () => { alive = false; controller.abort(); };
-  }, [session, credential, view?.rosterVersion, logout]);
-
-  async function authenticate(selected: 'teacher' | 'student', secret: string, studentName: string, priorActivity?: string) {
+  async function authenticate(selected: 'teacher' | 'student', secret: string, studentName: string, prior?: SavedStudent) {
     const id = ++operation.current;
     loginRequest.current?.abort();
     const controller = new AbortController();
@@ -67,24 +58,30 @@ export default function App() {
         method: 'POST',
         headers: {
           Authorization: basicHeader(selected, secret), 'Content-Type': 'application/json',
-          ...(priorActivity ? { 'X-Activity-Id': priorActivity } : {}),
+          ...(prior ? { 'X-Activity-Id': prior.activityId, 'X-Member-Id': prior.memberId,
+            ...(prior.classroomId && prior.activityEpoch ? { 'X-Classroom-Id': prior.classroomId, 'X-Activity-Epoch': prior.activityEpoch } : {}),
+          } : {}),
         },
         body: JSON.stringify(selected === 'student' ? { name: studentName } : {}),
         signal: controller.signal,
       });
-      const body = await response.json();
       if (id !== operation.current) return;
       if (!response.ok) {
+        const body = await readError(response);
+        if (id !== operation.current) return;
         if (response.status === 401 || body.code === 'ACTIVITY_EXPIRED') clearStudent();
-        throw new Error(body.message ?? (selected === 'teacher' ? '請確認教師密碼。' : '請確認加入碼與名稱。'));
+        throw new ApiRequestError(body.message);
       }
+      const body = await response.json();
+      if (id !== operation.current) return;
       setRole(selected); setCredential(secret); setSession(body); setRestoring(false);
+      navigate(selected === 'teacher' ? '/teacher/classrooms' : '/student');
       if (selected === 'student' && !saveStudent(body, secret)) {
         setNotice('此分頁無法暫存身分，重新整理後請再輸入加入碼與名稱。');
       }
     } catch (cause) {
       if (id !== operation.current) return;
-      setError(cause instanceof Error ? cause.message : '連線失敗，請確認服務已啟動。');
+      setError(requestMessage(cause, '連線失敗，請確認服務已啟動後再試。'));
       setRestoring(false);
     } finally {
       if (id === operation.current) setBusy(false);
@@ -95,7 +92,7 @@ export default function App() {
     const saved = readStudent();
     if (saved) {
       setRole('student'); setCredential(saved.joinCode); setName(saved.studentName); setRestoring(true);
-      void authenticate('student', saved.joinCode, saved.studentName, saved.activityId);
+      void authenticate('student', saved.joinCode, saved.studentName, saved);
     }
     return () => { operation.current++; loginRequest.current?.abort(); };
   }, []);
@@ -105,12 +102,6 @@ export default function App() {
     event.preventDefault();
     void authenticate(role, credential.trim(), name);
   }
-  function importUnconfirmed() {
-    confirmation.current = fullSnapshot;
-    setUnconfirmed(true);
-    refresh();
-  }
-
   if (!session) return <main className="shell">
     <section className="card login-card">
       <p className="eyebrow">課堂活動</p><h1>開始課堂活動</h1>
@@ -132,15 +123,13 @@ export default function App() {
     <footer>每個分頁可獨立加入。學生重新整理時會先驗證身分。</footer>
   </main>;
 
-  return <main className="shell"><section className="card workspace">
-    <div className="section-heading"><h1>{session.role === 'teacher' ? '教師工作台' : '學生工作台'}</h1><button className="quiet" onClick={logout}>登出</button></div>
-    {session.role === 'student' && <p>{view?.groupName ?? session.groupName} · {session.studentName}</p>}
+  if (session.role === 'teacher') return <TeacherPortal {...{ credential, path, navigate, logout, openProjection }} />;
+  return <main className="student-shell">
+    <header className="student-bar">
+      <div><h1>{session.classroomName ?? '學生工作台'}</h1><p>{view?.groupName ?? session.groupName} · {session.studentName}</p></div>
+      <button className="quiet" onClick={logout}>登出</button>
+    </header>
     {notice && <p role="status">{notice}</p>}{error && <p className="error" role="alert">{error}</p>}
-    {session.role === 'teacher' ? <>
-      {roster && <Roster session={session} credential={credential} roster={roster} onSave={next => setRoster(old => !old || next.rosterVersion >= old.rosterVersion ? next : old)} />}
-      <WorksheetImport session={session} credential={credential} preview={view?.worksheetPreview ?? null} locked={roster?.locked ?? false} unconfirmed={unconfirmed} onBusy={setImportBusy} onPublished={refresh} onUnconfirmed={importUnconfirmed} onExpired={logout} />
-      <TeacherRound session={session} credential={credential} view={view} syncError={syncError} blocked={unconfirmed || importBusy} refresh={refresh} fullSnapshot={fullSnapshot} onExpired={logout} />
-      <TeacherResults session={session} credential={credential} source={view?.worksheetPreview?.source} />
-    </> : <StudentRound session={session} credential={credential} view={view} syncError={syncError} refresh={refresh} fullSnapshot={fullSnapshot} onExpired={logout} />}
-  </section></main>;
+    <StudentRound {...{ session, credential, view, syncError, refresh, fullSnapshot }} onExpired={logout} />
+  </main>;
 }

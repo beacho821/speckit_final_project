@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import type { Activity } from './activity.js';
-import { changed } from './activity.js';
+import { changed, projectionChanged } from './activity.js';
 import { DomainError } from './rounds.js';
 
 export function validateName(input: unknown, label = '組名'): string {
@@ -10,13 +10,21 @@ export function validateName(input: unknown, label = '組名'): string {
   return name;
 }
 function editable(a: Activity) { if (a.rosterLocked) throw new DomainError(409, 'ROSTER_LOCKED', '名單已鎖定，請於新活動開始前調整。'); }
-function rosterChanged(a: Activity, oldGroup?: string) { a.rosterVersion++; changed(a, ['teacher',...a.groups.map(g=>`student:${g.id}`),...(oldGroup?[`student:${oldGroup}`]:[])]); }
+function rosterChanged(a: Activity, oldGroup?: string) { a.rosterVersion++; changed(a, ['teacher',...a.groups.map(g=>`student:${g.id}`),...(oldGroup?[`student:${oldGroup}`]:[])]); projectionChanged(a); }
 export function rosterFor(a: Activity) {
-  return { groups:a.groups.map(g=>({...g,joinCode:a.joinCodes.get(g.id)!,members:[...a.members.values()].filter(m=>m.groupId===g.id).map(m=>({id:m.id,name:m.name}))})),locked:a.rosterLocked,rosterVersion:a.rosterVersion };
+  return { groups:a.groups.map(g=>({...g,joinCode:a.joinCodes.get(g.id) ?? '',members:[...a.members.values()].filter(m=>m.groupId===g.id).map(m=>({id:m.id,name:m.name}))})),locked:a.rosterLocked,rosterVersion:a.rosterVersion };
 }
-export function addGroup(a: Activity, input: unknown, teacherPassword: string, generate?: () => string) {
+export function addGroup(a: Activity, input: unknown, teacherPassword: string, generate?: () => string, issueCode?: () => string | null) {
   editable(a); const name=validateName(input);
   if(a.groups.some(g=>g.name===name)) throw new DomainError(409,'DUPLICATE_GROUP_NAME','組名不可重複，請使用不同組名。');
+  if (issueCode) {
+    const issuedCode = issueCode();
+    const group = { id: randomUUID(), name };
+    a.groups.push(group);
+    if (issuedCode !== null) a.joinCodes.set(group.id, issuedCode);
+    rosterChanged(a);
+    return group;
+  }
   const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const make=generate??(()=>Array.from({length:8},()=>alphabet[randomInt(alphabet.length)]).join(''));
   let code=make(), attempts=0;

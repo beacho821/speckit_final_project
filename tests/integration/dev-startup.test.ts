@@ -40,9 +40,9 @@ describe('單指令開發啟動', () => {
     const response = await fetch(run.url + '/api/sessions', { method:'POST', headers:auth }); expect(response.status).toBe(200);
     expect((await fetch(run.url + '/api/sessions', {method:'POST',headers:{Authorization:basic('teacher',original)}})).status).toBe(401);
     expect(run.output().includes(original) || run.output().includes(override)).toBe(false);
-    const firstSession=await response.json();
+    const firstRoom = await (await fetch(run.url + '/api/classrooms', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '啟動測試教室' }) })).json();
     await writeFile(join(folder!,'frontend/src/App.tsx'), await (await import('node:fs/promises')).readFile(join(folder!,'frontend/src/App.tsx'),'utf8')+'\n');
-    const same=await(await fetch(run.url+'/api/sessions',{method:'POST',headers:auth})).json();expect(same.activityId).toBe(firstSession.activityId);
+    const same=await(await fetch(run.url+'/api/classrooms/'+firstRoom.id,{headers:auth})).json();expect(same.activityId).toBe(firstRoom.activityId);
     child!.kill('SIGTERM'); await new Promise(r => child!.once('exit', r));
     await expect(fetch(`http://127.0.0.1:${run.apiPort}/api/sessions`)).rejects.toThrow();
   },30000);
@@ -57,4 +57,4 @@ it('API或Vite連接埠衝突會非零退出並清理已開服務',async()=>{
  try{const run=await launch(undefined,randomUUID(),{[kind]:port});expect(child!.exitCode).not.toBeNull();expect(child!.exitCode).not.toBe(0);expect(run.output()).not.toContain('課堂活動已啟動');if(kind==='vite')await expect(fetch(`http://127.0.0.1:${run.apiPort}`)).rejects.toThrow();}finally{await new Promise<void>(r=>blocker.close(()=>r()));await removeFixture();folder=undefined;child=undefined;}
  }
 },30000);
-it('SIGINT清埠且再次啟動產生不同活動ID',async()=>{const password=randomUUID();const one=await launch(undefined,password);const headers={Authorization:basic('teacher',password)};const first=await(await fetch(one.url+'/api/sessions',{method:'POST',headers})).json();child!.kill('SIGINT');await new Promise(r=>child!.once('exit',r));await expect(fetch(`http://127.0.0.1:${one.apiPort}`)).rejects.toThrow();await removeFixture();folder=undefined;child=undefined;const two=await launch(undefined,password);const second=await(await fetch(two.url+'/api/sessions',{method:'POST',headers})).json();expect(second.activityId).not.toBe(first.activityId);},30000);
+it('SIGINT清埠且再次啟動產生不同活動ID',async()=>{const password=randomUUID();const one=await launch(undefined,password);const headers={Authorization:basic('teacher',password)};const first=await(await fetch(one.url+'/api/classrooms',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({name:'第一間'})})).json();child!.kill('SIGINT');await new Promise(r=>child!.once('exit',r));await expect(fetch(`http://127.0.0.1:${one.apiPort}`)).rejects.toThrow();await removeFixture();folder=undefined;child=undefined;const two=await launch(undefined,password);const second=await(await fetch(two.url+'/api/classrooms',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({name:'第二間'})})).json();expect(second.activityId).not.toBe(first.activityId);},30000);

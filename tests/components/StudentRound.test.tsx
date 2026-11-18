@@ -83,3 +83,19 @@ it('開題後在對應作答欄顯示完整題幹', async () => {
   await mount({...baseView, unit:{...baseView.unit!, questions:[{questionId:'1（1）', prompt:'請說明裝置的用途。', missingPrompt:false}]}});
   expect(host!.querySelector('textarea')?.labels?.[0]?.textContent).toContain('請說明裝置的用途。');
 });
+
+it('作答區保留題組名稱、每個小題的題號與完整題幹', async () => {
+  const questions = [
+    { questionId: '1（1）', prompt: '請用完整句子描述中央處理器的主要工作。', missingPrompt: false },
+    { questionId: '1（2）', prompt: '請列出主記憶體與儲存裝置的差異，並各舉一個例子。', missingPrompt: false },
+  ];
+  await mount({ ...baseView, unit: { ...baseView.unit!, name: '電腦硬體', questions } });
+  expect(host!.querySelector('h3')?.textContent).toBe('電腦硬體');
+  expect([...host!.querySelectorAll('label')].map(label => label.textContent)).toEqual(
+    questions.map(question => question.questionId + question.prompt),
+  );
+  await act(async () => root!.render(<StudentRound session={session} credential="alpha" view={{
+    ...baseView, unit: { ...baseView.unit!, name: undefined, questions },
+  }} />));
+  expect(host!.querySelector('h3')?.textContent).toBe('1（1）、1（2）');
+});

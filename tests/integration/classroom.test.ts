@@ -64,3 +64,42 @@ describe('完整課堂 HTTP 演練', () => {
     } finally { await c.close(); }
   });
 });
+
+it('雙教室同時收件並各自定案，原教室投影不會跟隨教師切換', async () => {
+  const { classroom, basic } = await import('../helpers/classroom.js');
+  const c = await classroom();
+  try {
+    const secondResponse = await c.request('/classrooms', c.teacher, { name: '第二間教室' }, 'POST');
+    const second = await secondResponse.json();
+    async function prepare(roomId: string, teacher: typeof c.teacher) {
+      const group = (await (await c.request('/groups', teacher, { name: '甲組' }, 'POST')).json()).groups[0];
+      const authorization = basic('student', group.joinCode);
+      const member = await (await c.request('/sessions', { Authorization: authorization }, { name: '學生' }, 'POST')).json();
+      expect(member.classroomId).toBe(roomId);
+      const student = { ...teacher, Authorization: authorization, 'X-Member-Id': member.memberId };
+      const question = await (await c.request('/questions', teacher, { questionId: '1', prompt: '請作答。' }, 'POST')).json();
+      const round = await (await c.request('/rounds', teacher, { unitId: question.unitId }, 'POST')).json();
+      await c.request('/questions/' + question.questionKey, teacher, { questionRevision: 0, acceptedAnswersText: '答案' }, 'PATCH');
+      expect((await c.request('/rounds/' + round.id + '/start', teacher, undefined, 'POST')).status).toBe(200);
+      return { roomId, teacher, student, roundId: round.id };
+    }
+    const a = await prepare(c.room.id, c.teacher);
+    const b = await prepare(second.id, { ...c.teacher, 'X-Classroom-Id': second.id, 'X-Activity-Id': second.activityId });
+    const screen = (entry: typeof a) => c.request('/classrooms/' + entry.roomId + '/projection', entry.teacher).then(response => response.json());
+    const send = (entry: typeof a) => c.request('/rounds/' + entry.roundId + '/submissions', entry.student, { answers: [{ questionId: '1', text: '答案' }] }, 'POST');
+    expect((await screen(a)).phase).toBe('active');
+    expect((await screen(b)).phase).toBe('active');
+    expect((await send(a)).status).toBe(201);
+    expect((await screen(a)).groups[0].received).toBe(true);
+    expect((await screen(b)).groups[0].received).toBe(false);
+    await c.request('/rounds/' + a.roundId + '/end', a.teacher, undefined, 'POST');
+    expect((await send(b)).status).toBe(201);
+    for (const entry of [a,b]) {
+      if (entry === b) await c.request('/rounds/' + b.roundId + '/end', b.teacher, undefined, 'POST');
+      expect((await c.request('/rounds/' + entry.roundId + '/publish', entry.teacher, { reviewRevision: 0 }, 'POST')).status).toBe(200);
+      expect((await screen(entry)).winnerGroupName).toBe('甲組');
+      const response = await c.request('/classrooms/' + entry.roomId + '/results', entry.teacher);
+      expect((await response.json()).map((round: { roundId: string }) => round.roundId)).toEqual([entry.roundId]);
+    }
+  } finally { await c.close(); }
+});

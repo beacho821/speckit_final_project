@@ -7,11 +7,14 @@ import { makeMarkedWorksheet, makeMixedWorksheet, makeSimpleWorksheet } from '..
 
 const config: AppConfig = { teacherPassword: 'teacher-preview-secret', port: 0 };
 const sourceFor = (documentId: string, sheetId: number, sheetTitle: string) => ({ kind: 'google' as const, documentId, sheetId, sheetTitle, importedAt: 1 });
-const { app, activity } = createApp(config, { importWorksheet: async url => {
+const { app, classrooms } = createApp(config, { importWorksheet: async url => {
   const fixture = url === 'single' ? await makeSimpleWorksheet() : url === 'mixed' ? await makeMixedWorksheet() : url === 'moved' ? await makeMarkedWorksheet() : null;
   if (!fixture) throw new DomainError(422, 'INVALID_SHEET_URL', '來源格式錯誤，請修正後重試。');
   return { worksheet: { source: sourceFor(String(url), 7, fixture.sheet.name), ...identifyWorksheet(fixture.sheet) } };
 } });
+const room = await classrooms.create('匯入測試教室');
+const activity = room.activity;
+const scope = { 'X-Classroom-Id': room.id, 'X-Activity-Id': activity.id, 'X-Activity-Epoch': classrooms.runtime };
 let server: ReturnType<typeof app.listen>; let base = '';
 const auth = `Basic ${Buffer.from(`teacher:${config.teacherPassword}`).toString('base64')}`;
 beforeAll(async () => { server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve)); base = `http://127.0.0.1:${(server.address() as { port: number }).port}`; });
@@ -19,8 +22,6 @@ afterAll(async () => { await new Promise<void>((resolve, reject) => server.close
 
 describe('樣本學習單匯入入口', () => {
   it('三種版面經教師 HTTP 匯入後與預期題號、單位及填空數一致', async () => {
-    const login = await fetch(`${base}/api/sessions`, { method: 'POST', headers: { Authorization: auth } });
-    const { activityId } = await login.json() as { activityId: string };
     const expectations = [
       { url: 'single', unitCount: 6, fillCount: 6, questionIds: ['1', '2', '3', '4', '5', '6'] },
       { url: 'mixed', unitCount: 4, fillCount: 6, questionIds: ['1（1）', '1（2）', '2（1）', '2（2）', '3', '4'] },
@@ -28,14 +29,14 @@ describe('樣本學習單匯入入口', () => {
     ];
     let previous: typeof activity.worksheet = null;
     for (const expected of expectations) {
-      const response = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, 'X-Activity-Id': activityId, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: expected.url }) });
+      const response = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: expected.url }) });
       expect(response.status).toBe(200);
       const preview = await response.json() as { unitCount: number; fillCount: number; units: Array<{ questionIds: string[] }> };
       expect(preview.unitCount).toBe(expected.unitCount); expect(preview.fillCount).toBe(expected.fillCount);
       expect(preview.units.flatMap(unit => unit.questionIds)).toEqual(expected.questionIds);
       previous = activity.worksheet;
     }
-    const invalid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, 'X-Activity-Id': activityId, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'invalid' }) });
+    const invalid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'invalid' }) });
     expect(invalid.status).toBe(422); expect(activity.worksheet).toBe(previous);
   });
 });

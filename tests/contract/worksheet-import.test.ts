@@ -10,7 +10,7 @@ let markOlderReceived: () => void;
 let resumeOlder: () => void;
 const olderReceived = new Promise<void>(resolve => { markOlderReceived = resolve; });
 const olderCanFinish = new Promise<void>(resolve => { resumeOlder = resolve; });
-const { app, activity } = createApp(config, { importWorksheet: async (url, sheetId) => {
+const { app, classrooms } = createApp(config, { importWorksheet: async (url, sheetId) => {
   if (url === 'multi' && sheetId === undefined) return { candidates: [{ sheetId: 12, title: '樣本頁' }, { sheetId: 13, title: '備用頁' }] };
   if (url === 'broken') throw new DomainError(502, 'GOOGLE_READ_FAILED', '無法讀取試算表，請檢查權限。');
   if (url === 'invalid') throw new DomainError(422, 'INVALID_SHEET_URL', '僅支援 Google 試算表網址，請確認連結後重試。');
@@ -22,13 +22,16 @@ const { app, activity } = createApp(config, { importWorksheet: async (url, sheet
   }
   return { worksheet };
 } });
+const room = await classrooms.create('匯入測試教室');
+const activity = room.activity;
+const scope = { 'X-Classroom-Id': room.id, 'X-Activity-Id': activity.id, 'X-Activity-Epoch': classrooms.runtime };
 let server: ReturnType<typeof app.listen>; let base = '';
 const auth = `Basic ${Buffer.from(`teacher:${config.teacherPassword}`).toString('base64')}`;
 beforeAll(async () => { server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve)); base = `http://127.0.0.1:${(server.address() as { port: number }).port}`; });
 afterAll(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 
 async function importRequest(url: string, sheetId?: number) {
-  return fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, 'X-Activity-Id': activity.id, 'Content-Type': 'application/json' }, body: JSON.stringify({ url, ...(sheetId === undefined ? {} : { sheetId }) }) });
+  return fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url, ...(sheetId === undefined ? {} : { sheetId }) }) });
 }
 
 describe('學習單匯入契約', () => {
@@ -49,10 +52,10 @@ describe('學習單匯入契約', () => {
     expect((await invalidUrl.json()).message).toContain('Google 試算表網址');
     expect(activity.worksheet).toBe(before);
 
-    const groupResponse = await fetch(`${base}/api/groups`, { method: 'POST', headers: { Authorization: auth, 'X-Activity-Id': activity.id, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '匯入權限組' }) });
+    const groupResponse = await fetch(`${base}/api/groups`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '匯入權限組' }) });
     const group = (await groupResponse.json()).groups[0] as { id: string; joinCode: string };
-    const studentHeader = { Authorization: `Basic ${Buffer.from(`student:${group.joinCode}`).toString('base64')}`, 'X-Activity-Id': activity.id };
-    const login = await fetch(`${base}/api/sessions`, { method: 'POST', headers: { ...studentHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '學生甲' }) });
+    const studentHeader = { Authorization: `Basic ${Buffer.from(`student:${group.joinCode}`).toString('base64')}`, ...scope };
+    const login = await fetch(`${base}/api/sessions`, { method: 'POST', headers: { Authorization: studentHeader.Authorization, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '學生甲' }) });
     const studentSession = await login.json() as { memberId: string };
     const forbidden = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { ...studentHeader, 'X-Member-Id': studentSession.memberId, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'single' }) });
     expect(forbidden.status).toBe(403);
@@ -62,7 +65,7 @@ describe('學習單匯入契約', () => {
     const before = activity.worksheet;
     const failed = await importRequest('broken');
     expect(failed.status).toBe(502); expect((await failed.json()).message).toContain('檢查權限'); expect(activity.worksheet).toBe(before);
-    const badGid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, 'X-Activity-Id': activity.id, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'multi', sheetId: -1 }) });
+    const badGid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'multi', sheetId: -1 }) });
     expect(badGid.status).toBe(422); expect(activity.worksheet).toBe(before);
   });
   it('較早發出的非同步匯入不能覆蓋較新的來源', async () => {
@@ -79,7 +82,7 @@ describe('學習單匯入契約', () => {
   });
   it('無教師憑證或兩種快照不一致時拒絕匯入並保留目前預覽', async () => {
     const before = activity.worksheet;
-    const unauthorized = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: 'Basic dGVhY2hlcjp3cm9uZw==', 'X-Activity-Id': activity.id, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'multi' }) });
+    const unauthorized = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: 'Basic dGVhY2hlcjp3cm9uZw==', ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'multi' }) });
     expect(unauthorized.status).toBe(401);
     const mismatch = await importRequest('mismatch');
     expect(mismatch.status).toBe(409); expect((await mismatch.json()).code).toBe('SHEET_CHANGED'); expect(activity.worksheet).toBe(before);

@@ -51,3 +51,6 @@ __pycache__/
 .ruff_cache/
 
 *.tmp
+
+# 教室存檔
+/classroom-data/

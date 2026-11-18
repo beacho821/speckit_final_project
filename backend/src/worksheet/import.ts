@@ -1,5 +1,5 @@
 import type { Worksheet } from '../../../shared/api.js';
-import { changed, type Activity } from '../activity.js';
+import { changed, projectionChanged, type Activity } from '../activity.js';
 import { worksheetUnits } from '../questions.js';
 import { DomainError } from '../rounds.js';
 import type { ImportResult } from './google-source.js';
@@ -20,6 +20,7 @@ export function publishImportedWorksheet(activity: Activity, result: ImportResul
   activity.units = [...imported, ...manual];
   activity.rounds = activity.rounds.filter(round => round.phase !== 'preparing');
   changed(activity, clearedRound ? undefined : ['teacher']);
+  if (clearedRound) projectionChanged(activity);
   return activity.worksheet;
 }
 

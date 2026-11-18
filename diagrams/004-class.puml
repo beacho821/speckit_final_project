@@ -1,0 +1,61 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName PingFang TC
+title 教室、挑戰與當次授權
+class "教室" as Classroom {
+  名稱
+  最近更新時間
+  活動設定
+}
+class "活動" as Activity {
+  名單鎖定狀態
+  目前或歷史
+}
+class "組別" as Group {
+  組名
+  成員名單
+}
+class "題組" as Unit {
+  題組名稱
+  小題與標準答案
+}
+class "挑戰回合" as Round {
+  階段
+  已開放的題組
+  當時分組
+}
+class "組別收件" as Submission {
+  伺服器接受的逐題答案
+  送答順位
+  本回合資格
+}
+class "定案結果" as Result {
+  逐題判定
+  教師補答
+  勝組
+}
+class "當次加入授權" as Grant {
+  用途：學生或投影
+  有效範圍：發碼世代、活動及組別
+}
+class "教室 JSON" as Saved <<存檔>>
+class "非機敏發碼世代" as IssuanceEpoch <<存檔>>
+Classroom "1" *-- "1..*" Activity
+Activity "1" *-- "0..*" Group
+Classroom "1" *-- "0..*" Unit
+Activity "1" *-- "0..*" Round
+Round "0..*" --> "1" Unit
+Round "1" *-- "0..*" Submission
+Submission "0..*" --> "1" Group : 當時組別
+Round "1" *-- "0..1" Result
+Grant "0..*" --> "1" Activity
+Grant "0..*" --> "1" Group
+Grant "0..*" --> "1" IssuanceEpoch : 驗證當次世代
+Classroom "1" ..> "1" Saved : 保存教室資料
+note right of Grant
+  僅在當次執行期間有效。
+  新活動或重啟後重新發放。
+  兩種加入碼均避開教師密碼。
+  全班投影驗證教師登入。
+end note
+@enduml

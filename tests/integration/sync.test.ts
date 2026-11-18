@@ -111,8 +111,8 @@ describe('授權畫面同步整合', () => {
           latencies.push(result.elapsedMs);
         }
         const sealedViews = await Promise.all(students.map(async student => (await (await c.request('/view', student.headers)).json())));
-        expect(sealedViews.every(view => view.phase === 'idle' && view.closedRoundIds.includes(round.id))).toBe(true);
-        expect(sealedViews.every(view => view.groups === undefined && view.ownAnswers === undefined)).toBe(true);
+        expect(sealedViews.every(view => view.phase === 'ended' && view.closedRoundIds.includes(round.id))).toBe(true);
+        expect(sealedViews.every((view, index) => view.groups === undefined && Boolean(view.ownAnswers) === visibleIndexes.includes(index + 1))).toBe(true);
         expect(Date.now() - startSubmission).toBeLessThan(1000);
         clock += 4000;
       }

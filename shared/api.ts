@@ -1,6 +1,6 @@
 export type SessionResponse =
-  | { activityId: string; role: 'teacher'; groupId?: never; groupName?: never; memberId?: never; studentName?: never }
-  | { activityId: string; role: 'student'; groupId: string; groupName: string; memberId: string; studentName: string };
+  | { activityId: string; classroomId?: string; activityEpoch?: string; role: 'teacher'; groupId?: never; groupName?: never; memberId?: never; studentName?: never }
+  | { activityId: string; classroomId?: string; activityEpoch?: string; classroomName?: string; role: 'student'; groupId: string; groupName: string; memberId: string; studentName: string };
 
 
 export interface GroupSummary { id: string; name: string }
@@ -45,13 +45,14 @@ export interface Answer {
   autoCorrect?: boolean;
   overrideCorrect?: boolean;
 }
-export interface Submission { groupId: string; rank: number; receivedAt: number; answers: Answer[] }
+export interface Submission { disqualified?: boolean; groupId: string; rank: number; receivedAt: number; receivedOn?: number; answers: Answer[] }
 export interface GradeEdit { groupId: string; questionId: string; correct: boolean }
 export interface TeacherSupplement { questionId: string; text: string }
 export interface ReviewView { reviewRevision: number; missingSupplementQuestionIds: string[]; supplements: TeacherSupplement[] }
 export interface Round {
   id: string;
   unitId: string;
+  unitName?: string;
   phase: Phase;
   openedAt?: number;
   openAtByGroup: Record<string, number>;
@@ -64,13 +65,14 @@ export interface Round {
 }
 export interface ActivityView {
   phase: Phase | 'idle';
+  writebackInProgress?: boolean;
   roundId: string | null;
   unit: (Pick<BuzzerUnit, 'id' | 'questionIds'> & Partial<Pick<BuzzerUnit, 'name' | 'fillBlankIds'>> & { questions?: QuestionPreview[] }) | null;
   closedRoundIds: string[];
   availableUnits?: Array<{ unitId: string; questionIds: string[]; questions?: QuestionPreview[] }>;
   editableQuestions?: RoundQuestion[];
   review?: ReviewView;
-  groups?: Array<{ id: string; name: string; received: boolean; rank?: number; answers?: Array<{ questionId: string; text: string; autoCorrect?: boolean; correct?: boolean }> }>;
+  groups?: Array<{ id: string; name: string; received: boolean; disqualified?: boolean; rank?: number; answers?: Array<{ questionId: string; text: string; autoCorrect?: boolean; correct?: boolean }> }>;
   groupId?: string;
   groupName?: string;
   rosterVersion?: number;
@@ -86,4 +88,38 @@ export interface RoundResultLine {
   winnerGroupId: string | null;
   teacherAnswer?: string;
   groups: Array<{ groupId: string; groupName: string; answer: string; rank: number | null; status: string; correct: boolean | null }>;
+}
+
+export interface ClassroomScope {
+  classroomId: string;
+  activityId: string;
+  activityEpoch: string;
+}
+
+export interface ClassroomSummary {
+  id: string;
+  name: string;
+  updatedAt: number;
+  phase: ActivityView['phase'];
+  unavailable?: boolean;
+  writebackInProgress?: boolean;
+}
+
+export interface ClassroomLocation extends ClassroomSummary, ClassroomScope {}
+export interface ArchivedRoster {
+  activityId: string;
+  startedAt: number;
+  archivedAt: number;
+  groups: Array<GroupSummary & { members: Array<{ id: string; name: string }> }>;
+}
+export interface HistoryRound { activityId: string; startedAt: number; roundId: string; title: string; winnerGroupName?: string }
+export interface ProjectionView {
+  classroomName: string;
+  groupName?: string;
+  phase: ActivityView['phase'];
+  title?: string;
+  questions: QuestionPreview[];
+  groups: Array<{ id: string; name: string; received: boolean }>;
+  winnerGroupName?: string;
+  version: number;
 }

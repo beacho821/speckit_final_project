@@ -1,0 +1,53 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName PingFang TC
+title 教室介面與資料邊界
+left to right direction
+actor 老師 as Teacher
+actor 學生 as Student
+actor 投影裝置 as Screen
+package "課堂活動介面" {
+  component "現有登入" as Login
+  component "教室列表" as List
+  component "教室管理" as Settings
+  component "分組管理" as Groups
+  component "老師控制台\n含已定案答案" as Console
+  component "學生等待／作答／已送出" as Answering
+  component "教室與組別投影" as Projection
+}
+package "課堂服務" {
+  component "教室管理與授權" as Classroom
+  component "分組與題目設定" as Setup
+  component "搶答、收件與審核" as Challenge
+  component "依授權同步畫面" as Sync
+}
+folder "目前目錄的存檔資料夾" as Storage {
+  artifact "每間教室一份 JSON" as Saved
+  artifact "非機敏發碼世代" as IssuanceEpoch
+}
+Teacher --> Login
+Student --> Login
+Screen --> Projection : 以加入碼開啟組別投影
+Login --> List : 老師
+Login --> Answering : 學生
+List --> Settings : 建立或恢復主持
+Settings --> Groups
+Settings --> Console : 共用開題就緒狀態
+Settings --> Projection : 老師開啟全班投影
+Groups --> Projection : 組別投影加入碼
+List --> Classroom
+Groups --> Setup
+Settings --> Setup
+Console --> Challenge
+Answering --> Challenge : 送出本組答案
+Answering --> Sync
+Projection --> Sync
+Sync --> Classroom : 驗證教師或當次活動及組別
+Sync --> Challenge
+Setup --> Classroom
+Challenge --> Classroom
+Classroom --> Saved : 各教室獨立儲存及載入
+Classroom --> IssuanceEpoch : 啟動時先提交新世代
+cloud "Google 工作表" as Worksheet
+Classroom --> Worksheet : 每張工作表依序回填
+@enduml

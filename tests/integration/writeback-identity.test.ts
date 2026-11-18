@@ -176,3 +176,69 @@ describe('Google 原稿身分回填整合', () => {
     expect(googleMock.batchUpdate).toHaveBeenCalledOnce();
   });
 });
+
+it('同工作表回填佔用時拒絕第二間教室，重試重新比對原稿', async () => {
+  const { classroom } = await import('../helpers/classroom.js');
+  const { configureWorksheet, finishRound, worksheet } = await import('../helpers/worksheet.js');
+  const { prepareRound, startRound, submitAnswers } = await import('../../backend/src/rounds.js');
+  const { planWriteback } = await import('../../backend/src/worksheet/writeback.js');
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const activities = new Map<string, ReturnType<typeof createActivity>>();
+  const remote = new Map<number, typeof worksheet>();
+  let attempts = 0;
+  const c = await classroom({
+    writeback: async rounds => {
+      const activity = activities.get(rounds[0].id)!;
+      const current = remote.get(activity.worksheet!.source.sheetId)!;
+      attempts++;
+      const plan = planWriteback(activity, current, rounds);
+      if (attempts === 1) { enter(); await pending; }
+      for (const { fill, text } of plan.writes) {
+        fill.originalValue = text;
+        fill.originalType = 'string';
+      }
+      return { written: plan.writes.map(write => write.fill.questionId), alreadyMatched: plan.matched, noWinner: plan.noWinner };
+    },
+  });
+  function prepare(room: typeof c.room, sheetId: number, answer: string) {
+    const activity = room.activity;
+    activity.worksheet = structuredClone(worksheet);
+    activity.worksheet.source.sheetId = sheetId;
+    if (!remote.has(sheetId)) remote.set(sheetId, structuredClone(activity.worksheet));
+    activity.groups = [{ id: '組', name: '甲組' }];
+    configureWorksheet(activity, () => [answer]);
+    const round = prepareRound(activity, activity.units[0].id);
+    startRound(activity, round.id, 100);
+    submitAnswers(activity, round.id, '組', round.questions!.map(question => ({ questionId: question.questionId, text: answer })), 100);
+    finishRound(activity, round.id);
+    activities.set(round.id, activity);
+    return { ...c.teacher, 'X-Classroom-Id': room.id, 'X-Activity-Id': activity.id };
+  }
+  try {
+    const second = await c.classrooms.create('同一工作表');
+    const third = await c.classrooms.create('另一工作表');
+    const firstHeaders = prepare(c.room, 1, '甲答案');
+    const secondHeaders = prepare(second, 1, '乙答案');
+    const thirdHeaders = prepare(third, 2, '丙答案');
+    const writeback = (headers: typeof firstHeaders) => c.request('/worksheet/writeback', headers, undefined, 'POST');
+    const first = writeback(firstHeaders);
+    await entered;
+    const busy = await writeback(secondHeaders);
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toMatchObject({ code: 'WRITEBACK_TARGET_BUSY' });
+    expect(attempts).toBe(1);
+    expect((await c.request('/classrooms/' + c.room.id, firstHeaders, undefined, 'DELETE')).status).toBe(409);
+    expect((await c.request('/classrooms/' + c.room.id + '/activities', firstHeaders, undefined, 'POST')).status).toBe(409);
+    expect((await writeback(thirdHeaders)).status).toBe(200);
+    release();
+    expect((await first).status).toBe(200);
+    const conflict = await writeback(secondHeaders);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: 'WRITEBACK_CONFLICT' });
+    expect(attempts).toBe(3);
+    expect(remote.get(1)?.fills.every(fill => fill.originalValue === '甲答案')).toBe(true);
+    expect(second.activity.writebackInProgress).toBe(false);
+  } finally { release(); await c.close(); }
+});

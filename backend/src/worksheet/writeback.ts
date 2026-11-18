@@ -24,7 +24,7 @@ export function planWriteback(activity: Activity, current: Worksheet, rounds = a
   for (const round of rounds.filter(item => item.phase === 'ended')) {
     const unit = source.units.find(item => item.id === round.unitId);
     if (!unit) continue;
-    const winner = round.submissions.find(submission => submission.groupId === round.winnerGroupId);
+    const winner = round.submissions.find(submission => !submission.disqualified && submission.groupId === round.winnerGroupId);
     if (!winner) { noWinner.push(...unit.questionIds); continue; }
     for (const answer of winner.answers) winners.set(answer.questionId, { text: answer.text, unitName: unit.name });
   }

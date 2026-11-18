@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ActivityView, RoundQuestion, SessionResponse } from '../../shared/api';
 import { activityHeaders, readError } from './api';
 import RoundHistory from './RoundHistory';
@@ -16,6 +16,8 @@ interface Props {
   refresh?: () => void;
   fullSnapshot?: number;
   onExpired?: () => void;
+  mode?: 'settings' | 'console' | 'combined';
+  onSettings?: () => void;
 }
 
 interface QuestionEdit {
@@ -29,16 +31,20 @@ interface QuestionDraft {
   edit: QuestionEdit;
 }
 
-export default function TeacherRound({ session, credential, view, syncError = '', blocked = false, refresh, fullSnapshot, onExpired }: Props) {
+export default function TeacherRound({ session, credential, view, syncError = '', blocked = false, refresh, fullSnapshot, onExpired, mode = 'combined', onSettings }: Props) {
   const [selected, setSelected] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [unknownAt, setUnknownAt] = useState<number | undefined>();
+  const actionRequest = useRef<AbortController | null>(null);
   const [drafts, setDrafts] = useState<Record<string, QuestionDraft>>({});
   const awaitingSnapshot = unknownAt !== undefined && fullSnapshot !== undefined && fullSnapshot <= unknownAt;
   const disabled = blocked || busy || awaitingSnapshot;
   useEffect(() => { setSelected(''); }, [view?.roundId, view?.worksheetPreview?.source.importedAt]);
-  useEffect(() => { setDrafts({}); }, [session.activityId]);
+  useEffect(() => {
+    setDrafts({}); setBusy(false); setUnknownAt(undefined); setMessage('');
+    return () => actionRequest.current?.abort();
+  }, [session.activityId]);
   useEffect(() => {
     if (unknownAt !== undefined && fullSnapshot !== undefined && fullSnapshot > unknownAt) {
       setUnknownAt(undefined);
@@ -47,16 +53,21 @@ export default function TeacherRound({ session, credential, view, syncError = ''
   }, [fullSnapshot, unknownAt]);
 
   const action: TeacherAction = async (path, body, method = 'POST') => {
+    if (actionRequest.current && !actionRequest.current.signal.aborted) return false;
+    const controller = new AbortController();
+    actionRequest.current = controller;
     setBusy(true);
     setMessage('');
     try {
       const response = await fetch(path, {
-        method,
+        method, signal: controller.signal,
         headers: { ...activityHeaders(session, credential), 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
+      if (controller.signal.aborted) return false;
       if (!response.ok) {
         const issue = await readError(response);
+        if (controller.signal.aborted) return false;
         if (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED') onExpired?.();
         else {
           setMessage(issue.message);
@@ -69,12 +80,14 @@ export default function TeacherRound({ session, credential, view, syncError = ''
       refresh?.();
       return true;
     } catch {
+      if (controller.signal.aborted) return false;
       setUnknownAt(fullSnapshot);
       setMessage('操作結果待確認，請等待最新課堂狀態，再核對目前資料。');
       refresh?.();
       return false;
     } finally {
-      setBusy(false);
+      if (actionRequest.current === controller) actionRequest.current = null;
+      if (!controller.signal.aborted) setBusy(false);
     }
   };
 
@@ -104,6 +117,8 @@ export default function TeacherRound({ session, credential, view, syncError = ''
   }
 
   if (!view) return <section className="round-panel"><h2>課堂回合</h2><p className="muted">{syncError || '正在連線並取得課堂狀態…'}</p></section>;
+  const showSettings = mode !== 'console';
+  const showConsole = mode !== 'settings';
   const canPrepare = view.phase === 'idle' || view.phase === 'preparing';
   const editableQuestions = view.phase === 'preparing' ? view.editableQuestions ?? [] : [];
   const editableKeys = new Set(editableQuestions.map(question => draftKey(question.questionKey)));
@@ -111,12 +126,25 @@ export default function TeacherRound({ session, credential, view, syncError = ''
   const archivedDrafts = Object.entries(drafts).filter(([key]) => !editableKeys.has(key));
   const choice = view.availableUnits?.find(unit => unit.unitId === selected);
   const roundPath = view.roundId ? `/api/rounds/${view.roundId}` : undefined;
-  const title = { idle: '尚未開題', preparing: '準備中', active: '進行中', reviewing: '待確認判分', ended: '已公布' }[view.phase];
+  const title = mode === 'console' && view.phase === 'idle' && view.closedRoundIds.length ? '已定案' : { idle: '尚未開題', preparing: '準備中', active: '進行中', reviewing: '待確認判分', ended: '已公布' }[view.phase];
+
+  const preparationIssue = activeDraft ? '請先儲存題目修改'
+    : !view.groups?.length ? '請先建立分組'
+      : editableQuestions.some(question => question.missingPrompt || !question.acceptedAnswers.length) ? '請補齊題幹和標準答案' : '';
 
   return <section className="round-panel">
-    <div className="section-heading"><div><p className="eyebrow">課堂回合</p><h2>{title}</h2></div></div>
+    <div className="section-heading console-heading">
+      <h2>{mode === 'settings' ? '備課題目' : title}</h2>
+      {mode === 'console' && roundPath && view.phase === 'preparing' && <button className="primary"
+        disabled={disabled || Boolean(preparationIssue)} onClick={() => void action(`${roundPath}/start`)}>開放搶答</button>}
+      {mode === 'console' && roundPath && view.phase === 'active' && <button className="danger-button" disabled={disabled}
+        onClick={() => void action(`${roundPath}/end`)}>結束搶答</button>}
+    </div>
+    {mode === 'console' && (view.phase === 'idle' || (view.phase === 'preparing' && (preparationIssue || blocked))) && <p className="work-message">
+      {preparationIssue || (blocked ? '請等待題源同步完成' : '請先準備題目')}。 <button className="secondary-button" onClick={onSettings}>返回備課</button>
+    </p>}
     {syncError && <p className="error" role="status">{syncError}</p>}
-    {canPrepare && <div className="form-stack">
+    {showSettings && canPrepare && <div className="form-stack">
       <label htmlFor="unit">{view.phase === 'preparing' ? '更換準備中的題目' : '選擇尚未使用的題目'}</label>
       <select id="unit" disabled={disabled} value={selected || (view.phase === 'preparing' ? view.unit?.id ?? '' : '')} onChange={event => setSelected(event.target.value)}>
         <option value="">請選擇題目</option>
@@ -126,10 +154,11 @@ export default function TeacherRound({ session, credential, view, syncError = ''
         <p className="question-prompt" key={question.questionId}><b>{question.questionId}</b> {question.prompt ?? '缺少題目'}</p>)}
       <button className="primary" disabled={!selected || disabled} onClick={() => void action('/api/rounds', { unitId: selected })}>{view.phase === 'preparing' ? '更換準備題目' : '準備這一題'}</button>
     </div>}
-    {canPrepare && <ManualQuestion disabled={disabled} onAdd={(questionId, prompt) => action('/api/questions', { questionId, prompt })} />}
+    {showSettings && canPrepare && <ManualQuestion disabled={disabled} onAdd={(questionId, prompt) => action('/api/questions', { questionId, prompt })} />}
+    <div className={mode === 'console' && view.phase === 'active' ? 'console-grid' : undefined}><div>
     {view.unit && <div className="question-chip">題號：{view.unit.questionIds.join('、')}</div>}
     {view.unit?.questions?.map(question => <p className="question-prompt" key={question.questionId}><b>{question.questionId}</b> {question.prompt ?? '缺少題目'}</p>)}
-    {view.phase === 'preparing' && roundPath && <>
+    {showSettings && view.phase === 'preparing' && roundPath && <>
       {editableQuestions.map(question => {
         const draft = drafts[draftKey(question.questionKey)]?.edit;
         const stale = draft !== undefined && draft.questionRevision !== question.questionRevision;
@@ -143,9 +172,9 @@ export default function TeacherRound({ session, credential, view, syncError = ''
           <button className="secondary-button" disabled={!draft || stale} onClick={() => draft && void saveQuestion(question, draft)}>儲存第 {question.questionId} 題</button>
         </fieldset>;
       })}
-      <button className="primary" disabled={disabled || !view.groups?.length || activeDraft} onClick={() => void action(`${roundPath}/start`)}>開始搶答</button>
+      {mode === 'combined' && <button className="primary" disabled={disabled || !view.groups?.length || activeDraft} onClick={() => void action(`${roundPath}/start`)}>開始搶答</button>}
     </>}
-    {archivedDrafts.length > 0 && <details open className="question-editor">
+    {showSettings && archivedDrafts.length > 0 && <details open className="question-editor">
       <summary>已失效的備課草稿（可複製）</summary>
       {archivedDrafts.map(([key, { questionId, edit }]) => <fieldset className="form-stack question-editor" key={key}>
         <legend>原第 {questionId} 題</legend>
@@ -153,15 +182,17 @@ export default function TeacherRound({ session, credential, view, syncError = ''
         {edit.acceptedAnswersText !== undefined && <label>原標準答案草稿<textarea rows={3} readOnly value={edit.acceptedAnswersText} /></label>}
       </fieldset>)}
     </details>}
-    {view.phase === 'active' && roundPath && <button className="danger-button" disabled={disabled} onClick={() => void action(`${roundPath}/end`)}>停止收件</button>}
-    {view.phase === 'reviewing' && roundPath && view.review && <RoundReview
+    {mode === 'combined' && view.phase === 'active' && roundPath && <button className="danger-button" disabled={disabled} onClick={() => void action(`${roundPath}/end`)}>停止收件</button>}
+    {showConsole && view.phase === 'reviewing' && roundPath && view.review && <RoundReview
       key={roundPath} roundPath={roundPath} questions={view.unit?.questions ?? []} groups={view.groups ?? []}
-      review={view.review} disabled={disabled} action={action} />}
-    {view.groups && view.phase !== 'reviewing' && <div className="group-progress">{view.groups.map(group => <article className="progress-card" key={group.id}>
+      review={view.review} disabled={disabled} action={action} classMode={mode === 'console'} />}
+    </div>
+    {showConsole && view.groups && view.phase !== 'reviewing' && <div className="group-progress">{view.groups.map(group => <article className="progress-card" key={group.id}>
       <div><strong>{group.name}</strong><span className={group.received ? 'status received' : 'status'}>{group.received ? `已送出 · 第 ${group.rank} 順位` : '尚未送出'}</span></div>
       {group.answers?.map(answer => <p key={answer.questionId}><span>{answer.questionId}</span>{answer.text}</p>)}
     </article>)}</div>}
+    </div>
     {message && <p className="muted" role="status">{message}</p>}
-    {view.closedRoundIds.length > 0 && <RoundHistory session={session} credential={credential} roundIds={view.closedRoundIds} snapshot={fullSnapshot} />}
+    {showConsole && (session.classroomId || view.closedRoundIds.length > 0) && <RoundHistory session={session} credential={credential} roundIds={view.closedRoundIds} snapshot={fullSnapshot} />}
   </section>;
 }
