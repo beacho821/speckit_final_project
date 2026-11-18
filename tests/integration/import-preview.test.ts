@@ -49,4 +49,27 @@ it('慢速raw上傳不能覆寫較新Google匯入；成功清準備回合保留�
  expect((await c.request('/worksheet/import',c.teacher,{url:'new'},'POST')).status).toBe(200);upload!.end(bytes.subarray(100));expect(await result).toBe(409);expect(c.activity.worksheet!.source).toMatchObject({kind:'google',documentId:'new'});expect(c.activity.rounds).toHaveLength(0);expect((await c.request(`/rounds/${prepared.id}/start`,c.teacher,undefined,'POST')).status).toBe(409);expect(c.activity.joinCodes.get(g.id)).toBe(g.joinCode);expect(c.activity.members.has(s.session.memberId)).toBe(true);
  }finally{await c.close();}
 });
-it('解析期間先開題則拒絕發布；候選、失敗與已發布但回應遺失皆以最新快照為準',async()=>{const {classroom}=await import('../helpers/classroom');let release:()=>void=()=>{};let entered:()=>void=()=>{};const started=new Promise<void>(r=>{entered=r;});const gate=new Promise<void>(r=>{release=r;});const c=await classroom({importWorksheet:async url=>{if(url==='slow'){entered();await gate;}return{worksheet:{source:{kind:'google',documentId:String(url),sheetId:1,sheetTitle:'隔離',importedAt:0},...identifyWorksheet((await makeSimpleWorksheet()).sheet)}};}});try{await c.group('甲');await c.request('/worksheet/import',c.teacher,{url:'old'},'POST');const old=c.activity.worksheet;const round=await(await c.request('/rounds',c.teacher,{unitId:old!.units[0].id},'POST')).json();const pending=c.request('/worksheet/import',c.teacher,{url:'slow'},'POST');await started;await c.request(`/rounds/${round.id}/start`,c.teacher,undefined,'POST');release();expect((await pending).status).toBe(409);expect(c.activity.worksheet).toBe(old);const snapshot=await(await c.request('/view')).json();expect(snapshot.worksheetPreview.source.documentId).toBe('old');}finally{release();await c.close();}});
+it('解析期間先開題則拒絕發布；候選、失敗與已發布但回應遺失皆以最新快照為準',async()=>{const {classroom}=await import('../helpers/classroom');let release:()=>void=()=>{};let entered:()=>void=()=>{};const started=new Promise<void>(r=>{entered=r;});const gate=new Promise<void>(r=>{release=r;});const c=await classroom({importWorksheet:async url=>{if(url==='slow'){entered();await gate;}return{worksheet:{source:{kind:'google',documentId:String(url),sheetId:1,sheetTitle:'隔離',importedAt:0},...identifyWorksheet((await makeSimpleWorksheet()).sheet)}};}});try{await c.group('甲');await c.request('/worksheet/import',c.teacher,{url:'old'},'POST');const old=c.activity.worksheet;const round=await(await c.request('/rounds',c.teacher,{unitId:old!.units[0].id},'POST')).json();const pending=c.request('/worksheet/import',c.teacher,{url:'slow'},'POST');await started;expect((await c.startConfiguredRound(round.id)).status).toBe(200);release();expect((await pending).status).toBe(409);expect(c.activity.worksheet).toBe(old);const snapshot=await(await c.request('/view')).json();expect(snapshot.worksheetPreview.source.documentId).toBe('old');}finally{release();await c.close();}});
+
+it.each(['single','mixed'] as const)('同一份資料從模擬 Google 與本機 XLSX 匯入的題幹相符（%s）', async kind => {
+  const { default: ExcelJS } = await import('exceljs');
+  const { reference } = await import('../fixtures/xlsx-variants');
+  const { classroom } = await import('../helpers/classroom');
+  const bytes = await reference(kind);
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(bytes as never);
+  const sheet = book.worksheets[0];
+  const c = await classroom({importWorksheet:async () => ({worksheet:{
+    source:{kind:'google',documentId:'跨來源對照',sheetId:1,sheetTitle:sheet.name,importedAt:0},
+    ...identifyWorksheet(sheet),
+  }})});
+  try {
+    const remote = await c.request('/worksheet/import',c.teacher,{url:'fixture'},'POST');
+    expect(remote.status).toBe(200);
+    const local = await fetch(c.base+'/api/worksheet/import/xlsx',{method:'POST',headers:{...c.teacher,'Content-Type':'application/octet-stream','X-File-Name':'reference.xlsx'},body:bytes});
+    expect(local.status).toBe(200);
+    const [google, xlsx] = await Promise.all([remote.json(),local.json()]);
+    expect(xlsx.units).toEqual(google.units);
+    expect(xlsx.units.flatMap((unit: {questions: unknown[]}) => unit.questions)).toHaveLength(6);
+  } finally { await c.close(); }
+});

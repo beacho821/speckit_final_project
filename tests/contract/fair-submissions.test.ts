@@ -31,14 +31,14 @@ describe('公平送出 HTTP 契約', () => {
       expect((await c.request('/worksheet/import', c.teacher, { url: 'fixture' }, 'POST')).status).toBe(200);
       const firstUnit = c.activity.worksheet!.units[0];
       const firstRound = await (await c.request('/rounds', c.teacher, { unitId: firstUnit.id }, 'POST')).json();
-      await c.request(`/rounds/${firstRound.id}/start`, c.teacher, undefined, 'POST');
+      await c.startConfiguredRound(firstRound.id, questionId => `${questionId}答案`);
       expect((await c.request(`/rounds/${firstRound.id}/submissions`, alphaStudent.headers, { answers: answers(firstUnit) }, 'POST')).status).toBe(201);
-      await c.request(`/rounds/${firstRound.id}/end`, c.teacher, undefined, 'POST');
+      await c.finishRound(firstRound.id);
 
       now = 500;
       const secondUnit = c.activity.worksheet!.units[1];
       const secondRound = await (await c.request('/rounds', c.teacher, { unitId: secondUnit.id }, 'POST')).json();
-      await c.request(`/rounds/${secondRound.id}/start`, c.teacher, undefined, 'POST');
+      await c.startConfiguredRound(secondRound.id, questionId => `${questionId}答案`);
       const waiting = await (await c.request('/view', alphaStudent.headers)).json();
       expect(waiting.waitRemainingMs).toBe(3000);
       expect(waiting.groups).toBeUndefined();
@@ -70,14 +70,14 @@ describe('公平送出 HTTP 契約', () => {
       for (const [index, student] of [a, b].entries()) {
         const unit = c.activity.worksheet!.units[index];
         const round = await (await c.request('/rounds', c.teacher, { unitId: unit.id }, 'POST')).json();
-        await c.request(`/rounds/${round.id}/start`, c.teacher, undefined, 'POST');
+        await c.startConfiguredRound(round.id, questionId => `${questionId}答案`);
         expect((await c.request(`/rounds/${round.id}/submissions`, student.headers, { answers: answers(unit) }, 'POST')).status).toBe(201);
-        await c.request(`/rounds/${round.id}/end`, c.teacher, undefined, 'POST');
+        await c.finishRound(round.id);
         now += 100;
       }
       const unit = c.activity.worksheet!.units[2];
       const round = await (await c.request('/rounds', c.teacher, { unitId: unit.id }, 'POST')).json();
-      await c.request(`/rounds/${round.id}/start`, c.teacher, undefined, 'POST');
+      await c.startConfiguredRound(round.id, questionId => `${questionId}答案`);
       expect(await (await c.request('/view', a.headers)).json()).toMatchObject({ waitRemainingMs: 0 });
       const responses = await Promise.all([
         c.request(`/rounds/${round.id}/submissions`, a.headers, { answers: answers(unit) }, 'POST'),

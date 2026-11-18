@@ -3,11 +3,12 @@ import { join } from 'node:path';
 import type { AppConfig } from './config.js';
 import { createActivity } from './activity.js';
 import { authenticate, requireTeacher } from './access.js';
-import { DomainError, endRound, prepareRound, startRound, submitAnswers } from './rounds.js';
-import { makeView, resultsFor } from './views.js';
+import { DomainError, endRound, prepareRound, publishRound, startRound, submitAnswers, updateReview } from './rounds.js';
+import { makeView, previewFor, resultsFor } from './views.js';
 import { importGoogleWorksheet, type ImportResult } from './worksheet/google-source.js';
 import { buildResultsCsv } from './results-csv.js';
 import { writebackToGoogle } from './worksheet/writeback.js';
+import { addManualQuestion, updateQuestion } from './questions.js';
 import { beginImport, publishImportedWorksheet } from './worksheet/import.js';
 import {importXlsxWorksheet, XLSX_LIMIT} from './worksheet/xlsx-source.js';
 import { addGroup, renameGroup, deleteGroup, joinMember, rosterFor } from './roster.js';
@@ -37,8 +38,8 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
       let name:string;try{name=decodeURIComponent(req.header('X-File-Name')??'');}catch{throw new DomainError(422,'INVALID_FILE_NAME','檔名格式不正確，請重新選擇 XLSX。');}
       const result=await importXlsxWorksheet(req.body??Buffer.alloc(0),name,sheetId);
       if('candidates' in result)return res.json({candidates:result.candidates});
-      const worksheet=publishImportedWorksheet(activity,result,req.importGeneration!,id,()=>alive&&!req.aborted&&!res.destroyed);
-      res.json(previewFor(worksheet));
+      publishImportedWorksheet(activity,result,req.importGeneration!,id,()=>alive&&!req.aborted&&!res.destroyed);
+      res.json(previewFor(activity));
     }catch(error){domainError(res,error);}
   });
   app.use(express.json({ limit: '100kb' }));
@@ -74,8 +75,8 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
         ? await services.importWorksheet(req.body?.url, rawSheetId)
         : await importGoogleWorksheet(config, req.body?.url, rawSheetId);
       if ('candidates' in imported) return res.json({ candidates: imported.candidates });
-      const worksheet = publishImportedWorksheet(activity, imported, generation, activityId, () => !req.aborted && !res.destroyed);
-      res.json(previewFor(worksheet));
+      publishImportedWorksheet(activity, imported, generation, activityId, () => !req.aborted && !res.destroyed);
+      res.json(previewFor(activity));
     } catch (error) {
       if (error instanceof DomainError) return res.status(error.status).json({ code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) });
       res.status(500).json({ code: 'IMPORT_FAILED', message: '匯入失敗，原有預覽仍保留。請重新檢查網址後再試。' });
@@ -83,6 +84,14 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
   });
 
   const teacherAuth = [authenticate(config, activity), requireTeacher];
+  app.post('/api/questions', ...teacherAuth, (req, res) => {
+    try { res.status(201).json(addManualQuestion(activity, req.body)); }
+    catch (error) { domainError(res, error); }
+  });
+  app.patch('/api/questions/:questionKey', ...teacherAuth, (req, res) => {
+    try { res.json(updateQuestion(activity, String(req.params.questionKey), req.body)); }
+    catch (error) { domainError(res, error); }
+  });
   app.post('/api/rounds', ...teacherAuth, (req, res) => {
     try { res.status(201).json(prepareRound(activity, req.body?.unitId)); }
     catch (error) { domainError(res, error); }
@@ -95,6 +104,14 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
     try { res.json(endRound(activity, String(req.params.id))); }
     catch (error) { domainError(res, error); }
   });
+  app.patch('/api/rounds/:id/review', ...teacherAuth, (req, res) => {
+    try { res.json(updateReview(activity, String(req.params.id), req.body)); }
+    catch (error) { domainError(res, error); }
+  });
+  app.post('/api/rounds/:id/publish', ...teacherAuth, (req, res) => {
+    try { res.json(publishRound(activity, String(req.params.id), req.body?.reviewRevision)); }
+    catch (error) { domainError(res, error); }
+  });
   app.post('/api/rounds/:id/submissions', authenticate(config, activity), (req, res) => {
     if (req.identity?.role !== 'student') return res.status(403).json({ code: 'FORBIDDEN', message: '此操作僅限學生組別使用。' });
     try { submitAnswers(activity, String(req.params.id), req.identity.groupId!, req.body?.answers, services.now?.()); res.status(201).json({ roundId: req.params.id, received: true }); }
@@ -103,8 +120,8 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
   app.get('/api/rounds/:id/results', authenticate(config, activity), (req, res) => {
     const round = activity.rounds.find(item => item.id === req.params.id);
     if (!round) return res.status(404).json({ code: 'ROUND_NOT_FOUND', message: '找不到指定回合。' });
-    if (round.phase !== 'ended') return res.status(403).json({ code: 'RESULTS_HIDDEN', message: '回合結束後才會公布全班結果。' });
-    res.json(resultsFor(round, activity));
+    if (round.phase !== 'ended') return res.status(403).json({ code: 'RESULTS_HIDDEN', message: '老師公布後才能查看全班結果。' });
+    res.json(resultsFor(round));
   });
   app.get('/api/view', authenticate(config, activity), async (req, res) => {
     const identity = req.identity!;
@@ -130,18 +147,22 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
       res.setHeader('Content-Disposition', 'attachment; filename="classroom-results.csv"');
       res.send(csv);
     } catch (error) {
-      if (error instanceof Error && error.message === 'NO_ENDED_ROUNDS') return res.status(409).json({ code: 'NO_ENDED_ROUNDS', message: '尚無已結束回合，請先完成一題後再匯出。' });
-      res.status(409).json({ code: 'WORKSHEET_REQUIRED', message: '尚未匯入學習單，無法整理結果。' });
+      if (error instanceof Error && error.message === 'NO_ENDED_ROUNDS') return res.status(409).json({ code: 'NO_ENDED_ROUNDS', message: '尚無已公布回合，請先公布結果再匯出。' });
+      domainError(res, error);
     }
   });
   app.post('/api/worksheet/writeback', ...teacherAuth, async (_req, res) => {
+    if (!activity.worksheet) return res.status(409).json({ code: 'WRITEBACK_NOT_SUPPORTED', message: '目前沒有可回填的 Google 原稿，請下載活動 CSV。' });
     if(activity.worksheet?.source.kind==='xlsx')return res.status(409).json({code:'WRITEBACK_NOT_SUPPORTED',message:'本機 XLSX 學習單不支援回填原檔，請下載活動 CSV。'});
     if (activity.writebackInProgress) return res.status(409).json({ code: 'WRITEBACK_BUSY', message: '回填作業正在執行，請稍候再查看結果。' });
     const endedRounds = structuredClone(activity.rounds.filter(round => round.phase === 'ended'));
-    if (!endedRounds.length) return res.status(409).json({ code: 'NO_ENDED_ROUNDS', message: '尚無已結束回合，請先結束一題後再回填。' });
+    if (!endedRounds.length) return res.status(409).json({ code: 'NO_ENDED_ROUNDS', message: '尚無已公布回合，請先公布結果再回填。' });
     activity.writebackInProgress = true;
     try {
-      const result = services.writeback ? await services.writeback(endedRounds) : await writebackToGoogle(activity, config, endedRounds);
+      const sourceUnits = new Set(activity.worksheet.units.map(unit => unit.id));
+      const sourceRounds = endedRounds.filter(round => sourceUnits.has(round.unitId));
+      if (!sourceRounds.length) return res.json({ written: [], alreadyMatched: [], noWinner: [] });
+      const result = services.writeback ? await services.writeback(sourceRounds) : await writebackToGoogle(activity, config, sourceRounds);
       res.json(result);
     } catch (error) {
       if (error instanceof DomainError) return res.status(error.status).json({ code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) });
@@ -166,8 +187,4 @@ export function createApp(config: AppConfig, services: AppServices = {}) {
 function domainError(res: import('express').Response, error: unknown) {
   if (error instanceof DomainError) return res.status(error.status).json({ code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) });
   return res.status(500).json({ code: 'INTERNAL_ERROR', message: '操作未完成，請重新整理後再試。' });
-}
-
-function previewFor(worksheet: import('../../shared/api.js').Worksheet) {
-  return {source:worksheet.source,mainQuestionCount:new Set(worksheet.fills.map(f=>f.mainQuestionId)).size,unitCount:worksheet.units.length,fillCount:worksheet.fills.length,units:worksheet.units.map(({id,name,questionIds})=>({id,name,questionIds}))};
 }

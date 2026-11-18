@@ -6,12 +6,20 @@ import type { Worksheet } from '../../shared/api.js';
 
 const config: AppConfig = { teacherPassword: 'teacher-import-secret', port: 0 };
 const worksheet: Worksheet = { source: { kind: 'google', documentId: 'doc-test', sheetId: 12, sheetTitle: '樣本頁', importedAt: 1 }, fills: [], units: [{ id: 'u1', name: '第 1 題', questionIds: ['1'], fillBlankIds: [] }] };
+let markOlderReceived: () => void;
+let resumeOlder: () => void;
+const olderReceived = new Promise<void>(resolve => { markOlderReceived = resolve; });
+const olderCanFinish = new Promise<void>(resolve => { resumeOlder = resolve; });
 const { app, activity } = createApp(config, { importWorksheet: async (url, sheetId) => {
   if (url === 'multi' && sheetId === undefined) return { candidates: [{ sheetId: 12, title: '樣本頁' }, { sheetId: 13, title: '備用頁' }] };
   if (url === 'broken') throw new DomainError(502, 'GOOGLE_READ_FAILED', '無法讀取試算表，請檢查權限。');
   if (url === 'invalid') throw new DomainError(422, 'INVALID_SHEET_URL', '僅支援 Google 試算表網址，請確認連結後重試。');
   if (url === 'mismatch') throw new DomainError(409, 'SHEET_CHANGED', '學習單已變更，請重新匯入。');
-  if (url === 'slow') await new Promise(resolve => setTimeout(resolve, 80));
+  if (url === 'slow') {
+    markOlderReceived();
+    await olderCanFinish;
+    return { worksheet: { ...worksheet, source: { ...worksheet.source, documentId: 'doc-older' } } as Worksheet };
+  }
   return { worksheet };
 } });
 let server: ReturnType<typeof app.listen>; let base = '';
@@ -59,8 +67,13 @@ describe('學習單匯入契約', () => {
   });
   it('較早發出的非同步匯入不能覆蓋較新的來源', async () => {
     const older = importRequest('slow');
-    const newer = await importRequest('latest');
-    expect(newer.status).toBe(200);
+    await olderReceived;
+    try {
+      const newer = await importRequest('latest');
+      expect(newer.status).toBe(200);
+    } finally {
+      resumeOlder();
+    }
     const late = await older;
     expect(late.status).toBe(409); expect(activity.worksheet?.source.documentId).toBe('doc-test');
   });

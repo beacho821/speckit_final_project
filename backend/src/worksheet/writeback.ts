@@ -24,9 +24,9 @@ export function planWriteback(activity: Activity, current: Worksheet, rounds = a
   for (const round of rounds.filter(item => item.phase === 'ended')) {
     const unit = source.units.find(item => item.id === round.unitId);
     if (!unit) continue;
-    const first = round.submissions[0];
-    if (!first) { noWinner.push(...unit.questionIds); continue; }
-    for (const answer of first.answers) winners.set(answer.questionId, { text: answer.text, unitName: unit.name });
+    const winner = round.submissions.find(submission => submission.groupId === round.winnerGroupId);
+    if (!winner) { noWinner.push(...unit.questionIds); continue; }
+    for (const answer of winner.answers) winners.set(answer.questionId, { text: answer.text, unitName: unit.name });
   }
   const currentByQuestion = new Map<string, FillBlank[]>();
   for (const fill of current.fills) currentByQuestion.set(fill.questionId, [...(currentByQuestion.get(fill.questionId) ?? []), fill]);
@@ -80,7 +80,12 @@ export async function writebackToGoogle(activity: Activity, config: AppConfig, r
   if(activity.worksheet?.source.kind==='xlsx')throw new DomainError(409,'WRITEBACK_NOT_SUPPORTED','本機 XLSX 學習單不支援回填原檔，請下載活動 CSV。');
   const endedRounds = rounds.filter(round => round.phase === 'ended');
   if (!endedRounds.length) throw new DomainError(409, 'NO_ENDED_ROUNDS', '尚無已結束回合，請先結束一題後再回填。');
-  if (!activity.worksheet) throw new DomainError(409, 'WORKSHEET_REQUIRED', '尚未匯入學習單，無法回填。');
+  if (!activity.worksheet) throw new DomainError(409, 'WORKSHEET_REQUIRED', '尚未匯入學習單，請下載活動 CSV。');
+  const units = new Map(activity.worksheet.units.map(unit => [unit.id, unit]));
+  const sourceRounds = endedRounds.filter(round => units.has(round.unitId));
+  if (!sourceRounds.some(round => round.winnerGroupId)) {
+    return { written: [], alreadyMatched: [], noWinner: sourceRounds.flatMap(round => units.get(round.unitId)!.questionIds) };
+  }
   let live;
   try { live = await loadCurrentSource(config, activity.worksheet.source.documentId, activity.worksheet.source.sheetId, activity.worksheet.source.sheetTitle); }
   catch (error) {

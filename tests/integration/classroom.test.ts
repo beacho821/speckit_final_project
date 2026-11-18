@@ -20,9 +20,9 @@ describe('完整課堂 HTTP 演練', () => {
         if (winnerIndex === 2 && !students[2]) students[2] = await c.student(groups[2].joinCode, '晚加入學生');
         const teacherBefore = await (await c.request('/view')).json();
         const unit = c.activity.worksheet!.units[index];
-        expect(teacherBefore.availableUnits).toContainEqual({ unitId: unit.id, questionIds: unit.questionIds });
+        expect(teacherBefore.availableUnits).toContainEqual(expect.objectContaining({ unitId: unit.id, questionIds: unit.questionIds }));
         const round = await (await c.request('/rounds', c.teacher, { unitId: unit.id }, 'POST')).json();
-        expect((await c.request(`/rounds/${round.id}/start`, c.teacher, undefined, 'POST')).status).toBe(200);
+        expect((await c.startConfiguredRound(round.id, () => `第 ${index + 1} 回合答案`)).status).toBe(200);
         const teacherActive = await (await c.request('/view')).json();
         const studentViews = await Promise.all(students.map(async student => (await c.request('/view', student.headers)).json()));
         expect(studentViews.every(view => view.phase === 'active' && view.unit.questionIds[0] === String(index + 1))).toBe(true);
@@ -44,14 +44,14 @@ describe('完整課堂 HTTP 演練', () => {
           expect(view).not.toHaveProperty('joinCode');
           expect(view.version).toBe(studentViews[studentIndex].version + (studentIndex === winnerIndex ? 1 : 0));
         }
-        await c.request(`/rounds/${round.id}/end`, c.teacher, undefined, 'POST');
+        await c.finishRound(round.id);
         const finalView = await (await c.request('/view', students[0].headers)).json();
         expect(finalView.closedRoundIds).toContain(round.id);
         expect(finalView.availableUnits).toBeUndefined();
         if (index === 0) {
           const relogin = await c.request('/sessions', c.teacher, {}, 'POST');
           expect(await relogin.json()).toMatchObject({ activityId: c.activity.id, role: 'teacher' });
-          expect((await (await c.request('/view')).json()).availableUnits).toContainEqual({ unitId: c.activity.worksheet!.units[1].id, questionIds: ['2'] });
+          expect((await (await c.request('/view')).json()).availableUnits).toContainEqual(expect.objectContaining({ unitId: c.activity.worksheet!.units[1].id, questionIds: ['2'] }));
         }
         clock += 4000;
       }

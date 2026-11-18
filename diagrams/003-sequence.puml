@@ -1,0 +1,56 @@
+@startuml
+skinparam defaultFontName PingFang TC
+hide footbox
+title 搶答題目顯示、手動出題與老師補答 · 時序圖
+actor 老師 as Teacher
+participant 題目清單 as Questions
+participant 搶答回合 as Round
+actor 學生 as Student
+participant 判分與結果 as Review
+participant 結果匯出 as Export
+alt 匯入學習單
+  Teacher -> Questions : 匯入並檢查題號及題幹
+  Questions --> Teacher : 顯示題目及缺漏
+  opt 缺題幹
+    Teacher -> Questions : 補填題幹並儲存
+  end
+else 手動新增
+  Teacher -> Questions : 輸入唯一題號及題幹並儲存
+end
+Teacher -> Questions : 每題輸入標準答案，一行一種
+Teacher -> Round : 選題並開始
+Round -> Questions : 核對每題的題幹與標準答案
+alt 題幹或標準答案缺漏
+  Questions --> Round : 尚缺資料的完整題號
+  Round --> Teacher : 指出須補填的題目
+else 題幹與標準答案齊備
+  Round -> Round : 固定本回合的標準答案
+  Round --> Teacher : 顯示完整題幹及回合狀態
+  Round --> Student : 顯示完整題幹及作答欄
+  opt 組別送答
+    Student -> Round : 提交該組答案
+    Round --> Student : 本組收件狀態
+  end
+  Teacher -> Round : 停止收件
+  Round -> Review : 已收答案、原始順位及標準答案
+  Round --> Student : 待確認判分及本組收件狀態
+  Review -> Review : 任一標準答案相符即判為答對
+  Review --> Teacher : 各組的自動判分
+  opt 老師更正正誤
+    Teacher -> Review : 更正指定組別與題目的判分
+  end
+  opt 有題目無組答對
+    Review --> Teacher : 顯示對應題目的補答欄
+    Teacher -> Review : 逐題輸入老師補答
+  end
+  Teacher -> Review : 公布結果
+  alt 必填補答未完成
+    Review --> Teacher : 指出缺漏，保留草稿
+  else 判分與補答齊備
+    Review --> Student : 公布正誤、順位、勝組及老師補答
+    Review --> Teacher : 公布回合結果
+    Teacher -> Export : 匯出已公布結果
+    Export --> Teacher : CSV 含各組紀錄與老師補答列
+  end
+end
+@enduml

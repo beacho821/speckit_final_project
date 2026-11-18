@@ -29,6 +29,7 @@ describe('授權畫面同步整合', () => {
       for (const [roundIndex, winnerIndex] of winners.entries()) {
         const unit = c.activity.worksheet!.units[roundIndex];
         const round = await (await c.request('/rounds', c.teacher, { unitId: unit.id }, 'POST')).json();
+        await c.configureRound(questionId => `第 ${roundIndex + 1} 回合答案 ${questionId}`);
         const versions = await Promise.all([c.request('/view'), ...students.map(student => c.request('/view', student.headers))]
           .map(async response => (await (await response).json()).version as number));
         const beforeStart = [
@@ -91,9 +92,22 @@ describe('授權畫面同步整合', () => {
           const poll = endPolls.find(item => item.index === index)?.request ?? submissionPolls[index];
           const result = await within(poll, beforeEnd);
           expect(result.value.response.status).toBe(200);
-          expect(result.value.view.phase).toBe('idle');
-          expect(result.value.view.closedRoundIds).toContain(round.id);
+          expect(result.value.view.phase).toBe('reviewing');
+          expect(result.value.view.closedRoundIds).not.toContain(round.id);
           if (index > 0) expect(result.value.view).not.toHaveProperty('groups');
+          latencies.push(result.elapsedMs);
+        }
+        const roles = [c.teacher, ...students.map(student => student.headers)];
+        const reviewVersions = await Promise.all(roles.map(async headers => (await (await c.request('/view', headers)).json()).version));
+        const publishPolls = roles.map((headers, index) => c.request(`/view?after=${reviewVersions[index]}`, headers).then(async response => {
+          expect(response.status).toBe(200);
+          return response.json();
+        }));
+        const beforePublish = Date.now();
+        await c.publishReviewedRound(round.id);
+        for (const poll of publishPolls) {
+          const result = await within(poll, beforePublish);
+          expect(result.value.closedRoundIds).toContain(round.id);
           latencies.push(result.elapsedMs);
         }
         const sealedViews = await Promise.all(students.map(async student => (await (await c.request('/view', student.headers)).json())));

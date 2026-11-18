@@ -1,0 +1,59 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName PingFang TC
+hide empty methods
+hide circle
+title 搶答題目顯示、手動出題與老師補答 · 類別圖
+class "課堂活動" as Activity
+class "搶答單位" as Unit {
+  單題或題組
+}
+class "題目" as Question {
+  完整題號
+  題幹
+  匯入或手動
+}
+class "標準答案" as AcceptedAnswer {
+  一行一種寫法
+  開題後固定，僅老師可見
+}
+class "原稿填空位置" as SourceCell
+class "回合" as Round {
+  準備、開放作答、待確認判分、已公布
+}
+class "組別" as Group
+class "組別送答" as Submission {
+  收件順位
+}
+class "作答項目" as Answer {
+  答案原文
+  自動判分
+  老師更正後的最終正誤
+}
+class "老師補答" as TeacherAnswer {
+  補答原文
+}
+class "已公布結果" as Result
+Activity "1" *-- "0..*" Unit
+Activity "1" *-- "0..*" Round
+Activity "1" *-- "0..*" Group
+Unit "1" *-- "1..*" Question
+Question "1" *-- "0..*" AcceptedAnswer
+Question "1" --> "0..1" SourceCell
+Round "0..1" --> "1" Unit
+Round "1" *-- "0..*" Submission
+Submission "*" --> "1" Group
+Submission "1" *-- "1..*" Answer
+Answer "*" --> "1" Question
+Round "1" *-- "0..*" TeacherAnswer
+TeacherAnswer "*" --> "1" Question
+Round "1" *-- "0..1" Result
+Result "*" --> "0..1" Group : 勝組
+note bottom of AcceptedAnswer
+各完整題號在開題前須有至少一種答案。
+end note
+note bottom of TeacherAnswer
+同回合每個無人答對的完整題號
+各有一筆老師補答。
+end note
+@enduml

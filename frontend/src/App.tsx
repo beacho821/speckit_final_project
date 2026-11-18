@@ -139,8 +139,8 @@ export default function App() {
     {session.role === 'teacher' ? <>
       {roster && <Roster session={session} credential={credential} roster={roster} onSave={next => setRoster(old => !old || next.rosterVersion >= old.rosterVersion ? next : old)} />}
       <WorksheetImport session={session} credential={credential} preview={view?.worksheetPreview ?? null} locked={roster?.locked ?? false} unconfirmed={unconfirmed} onBusy={setImportBusy} onPublished={refresh} onUnconfirmed={importUnconfirmed} onExpired={logout} />
-      <TeacherRound session={session} credential={credential} view={view} syncError={syncError} blocked={unconfirmed || importBusy} onExpired={logout} />
+      <TeacherRound session={session} credential={credential} view={view} syncError={syncError} blocked={unconfirmed || importBusy} refresh={refresh} fullSnapshot={fullSnapshot} onExpired={logout} />
       <TeacherResults session={session} credential={credential} source={view?.worksheetPreview?.source} />
-    </> : <StudentRound session={session} credential={credential} view={view} syncError={syncError} refresh={refresh} onExpired={logout} />}
+    </> : <StudentRound session={session} credential={credential} view={view} syncError={syncError} refresh={refresh} fullSnapshot={fullSnapshot} onExpired={logout} />}
   </section></main>;
 }

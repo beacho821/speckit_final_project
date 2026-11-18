@@ -12,9 +12,9 @@ async function completedRound(c: Awaited<ReturnType<typeof classroom>>, includeS
   if (!c.activity.worksheet) await c.request('/worksheet/import', c.teacher, { url: 'fixture' }, 'POST');
   const unit = c.activity.worksheet!.units[0];
   const round = await (await c.request('/rounds', c.teacher, { unitId: unit.id }, 'POST')).json();
-  await c.request(`/rounds/${round.id}/start`, c.teacher, undefined, 'POST');
+  await c.startConfiguredRound(round.id, questionId => `答案 ${questionId}`);
   if (includeSubmission) await c.request(`/rounds/${round.id}/submissions`, student.headers, { answers: unit.questionIds.map(questionId => ({ questionId, text: `答案 ${questionId}` })) }, 'POST');
-  await c.request(`/rounds/${round.id}/end`, c.teacher, undefined, 'POST');
+  await c.finishRound(round.id);
   return { group, student, round };
 }
 

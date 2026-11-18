@@ -1,8 +1,9 @@
+import { configureWorksheet, finishRound } from '../helpers/worksheet.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../../backend/src/config.js';
 import { createActivity } from '../../backend/src/activity.js';
 import { addGroup } from '../../backend/src/roster.js';
-import { endRound, prepareRound, startRound, submitAnswers } from '../../backend/src/rounds.js';
+import { prepareRound, startRound, submitAnswers } from '../../backend/src/rounds.js';
 import { identifyWorksheet } from '../../backend/src/worksheet/identify.js';
 import { writebackToGoogle } from '../../backend/src/worksheet/writeback.js';
 import type ExcelJS from 'exceljs';
@@ -25,6 +26,7 @@ describe('Google 原稿身分回填整合', () => {
     const original = { source: { kind: 'google' as const, documentId: 'document-fixture', sheetId: 7, sheetTitle: importedFixture.sheet.name, importedAt: 1 }, ...identifyWorksheet(importedFixture.sheet) };
     const activity = createActivity();
     activity.worksheet = original;
+    configureWorksheet(activity, id => [`勝組答案-${id}`, '答案：原有標記／1']);
     const group = addGroup(activity, '甲組', config.teacherPassword, () => 'ABCD2345');
     const ended = [];
     const targetUnits = original.units;
@@ -32,7 +34,7 @@ describe('Google 原稿身分回填整合', () => {
       const round = prepareRound(activity, unit.id);
       startRound(activity, round.id, index * 100);
       submitAnswers(activity, round.id, group.id, unit.questionIds.map((questionId, answerIndex) => ({ questionId, text: index === 0 && answerIndex === 0 ? '答案：原有標記／1' : `勝組答案-${questionId}` })), index * 100);
-      ended.push(endRound(activity, round.id));
+      ended.push(finishRound(activity, round.id));
     }
 
     const currentFixture = await makeSimpleWorksheet();
@@ -88,9 +90,10 @@ describe('Google 原稿身分回填整合', () => {
     const imported = await makeMixedWorksheet();
     const sourceWorksheet = { source: { kind: 'google' as const, documentId: 'conflict-doc', sheetId: 7, sheetTitle: imported.sheet.name, importedAt: 1 }, ...identifyWorksheet(imported.sheet) };
     const activity = createActivity(); activity.worksheet = sourceWorksheet;
+    configureWorksheet(activity, id => [`答案-${id}`]);
     const group = addGroup(activity, '甲組', config.teacherPassword, () => 'ABCD2345');
     const unit = sourceWorksheet.units[0], round = prepareRound(activity, unit.id); startRound(activity, round.id, 0);
-    submitAnswers(activity, round.id, group.id, unit.questionIds.map(questionId => ({ questionId, text: `答案-${questionId}` })), 0); endRound(activity, round.id);
+    submitAnswers(activity, round.id, group.id, unit.questionIds.map(questionId => ({ questionId, text: `答案-${questionId}` })), 0); finishRound(activity, round.id);
     const current = await makeMixedWorksheet(); current.sheet.getCell(3, 2).value = '教師手動更改';
     googleMock.get.mockResolvedValue({ data: { sheets: [{ properties: { sheetId: 7, title: current.sheet.name }, data: [] }] } });
     googleMock.export.mockResolvedValue({ data: Buffer.from(await current.workbook.xlsx.writeBuffer()) });
@@ -104,12 +107,13 @@ describe('Google 原稿身分回填整合', () => {
     const source = { source: { kind: 'google' as const, documentId: 'mixed-doc', sheetId: 7, sheetTitle: fixture.sheet.name, importedAt: 1 }, ...identifyWorksheet(fixture.sheet) };
     expect(source.fills).toHaveLength(6);
     const activity = createActivity(); activity.worksheet = source;
+    configureWorksheet(activity, id => [`答案-${id}`, `答案 ${id}`, id, '=原文答案']);
     const group = addGroup(activity, '甲組', config.teacherPassword, () => 'ABCD2345');
     const ended = [];
     for (const [index, unit] of source.units.entries()) {
       const round = prepareRound(activity, unit.id); startRound(activity, round.id, index * 100);
       submitAnswers(activity, round.id, group.id, unit.questionIds.map(questionId => ({ questionId, text: `答案-${questionId}` })), index * 100);
-      ended.push(endRound(activity, round.id));
+      ended.push(finishRound(activity, round.id));
     }
     const currentFixture = await makeMixedWorksheet();
     for (let row = 1; row <= currentFixture.sheet.rowCount; row += 1) {
@@ -151,9 +155,10 @@ describe('Google 原稿身分回填整合', () => {
     const fixture = await makeSimpleWorksheet();
     const source = { source: { kind: 'google' as const, documentId: 'retry-doc', sheetId: 7, sheetTitle: fixture.sheet.name, importedAt: 1 }, ...identifyWorksheet(fixture.sheet) };
     const activity = createActivity(); activity.worksheet = source;
+    configureWorksheet(activity, id => [`答案-${id}`, `答案 ${id}`, id, '=原文答案']);
     const group = addGroup(activity, '甲組', config.teacherPassword, () => 'ABCD2345');
     const unit = source.units[0], round = prepareRound(activity, unit.id); startRound(activity, round.id, 0);
-    submitAnswers(activity, round.id, group.id, [{ questionId: '1', text: '=原文答案' }], 0); endRound(activity, round.id);
+    submitAnswers(activity, round.id, group.id, [{ questionId: '1', text: '=原文答案' }], 0); finishRound(activity, round.id);
     googleMock.get.mockResolvedValue({ data: { sheets: [{ properties: { sheetId: 7, title: fixture.sheet.name }, data: [] }] } });
     googleMock.export.mockImplementation(async () => ({ data: Buffer.from(await fixture.workbook.xlsx.writeBuffer()) }));
     googleMock.batchUpdate.mockImplementationOnce(async (input: any) => {

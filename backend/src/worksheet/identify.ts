@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type ExcelJS from 'exceljs';
 import type { BuzzerUnit, FillBlank } from '../../../shared/api.js';
 import { DomainError } from '../rounds.js';
+import { hasPrompt, parseQuestion } from '../questions.js';
 
 export interface IdentifiedWorksheet { fills: FillBlank[]; units: BuzzerUnit[] }
 export const textOf = (value: unknown): string => {
@@ -21,35 +22,27 @@ const isFormula = (value: unknown) => Boolean(value && typeof value === 'object'
 const clean = (value: string) => value.replace(/[\s　]+/g, '').trim();
 const markerPattern = /^(?:答案|填空)\s*[:：]\s*([^/／]+)\s*[/／]\s*(.+)$/;
 const notePattern = /課堂搶答\s*[:：]\s*([^/／\r\n]+)\s*[/／]\s*([^\r\n]+)/;
-const subPattern = /^(.+?)\s*[（(]\s*(\d+)\s*[）)]$/;
-
-export function parseQuestion(raw: string, inferredSub?: string) {
-  const value = raw.trim();
-  const match = value.match(subPattern);
-  const mainQuestionId = (match?.[1] ?? value).trim();
-  const subQuestionId = match?.[2] ?? inferredSub;
-  const questionId = subQuestionId ? `${mainQuestionId}（${subQuestionId}）` : mainQuestionId;
-  if (!mainQuestionId || !/\d/.test(mainQuestionId)) return null;
-  return { mainQuestionId, subQuestionId, questionId };
-}
 
 export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, string> = new Map()): IdentifiedWorksheet {
   const master = (row: number, column: number) => sheet.getCell(row,column).master;
   const cellValue = (row: number, col: number) => textOf(master(row,col).value);
-  let headerRow = 0, questionColumn = 0, answerColumn = 0;
+  let headerRow = 0, questionColumn = 0, answerColumn = 0, promptColumn = 0;
   sheet.eachRow(row => {
     if (headerRow) return;
-    let q=0,a=0;
+    let q=0,a=0,p=0;
     row.eachCell(cell => {
       if (cell.address !== cell.master.address) return;
       const label=clean(textOf(cell.value));
       if (/^(題號|題目號|題號編號)$/.test(label)) q=cell.fullAddress.col;
       if (/^(作答|答案|填答)$/.test(label)) a=cell.fullAddress.col;
+      if (label === '題目') p=cell.fullAddress.col;
     });
-    if(q&&a){headerRow=row.number;questionColumn=q;answerColumn=a;}
+    if(q&&a){headerRow=row.number;questionColumn=q;answerColumn=a;promptColumn=p;}
   });
 
   const fills: FillBlank[] = [];
+  const fillsByRow = new Map<number, FillBlank>();
+  const sharedPrompts: Array<{ fill: FillBlank; anchorRow: number }> = [];
   const unitMap = new Map<string, BuzzerUnit>();
   const seenQuestions = new Set<string>();
   const seenTargets = new Set<string>();
@@ -59,6 +52,10 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
     const row = sheet.getRow(rowNumber);
     const questionRaw = questionColumn ? cellValue(rowNumber, questionColumn).trim() : '';
     const answerCell = answerColumn ? master(rowNumber, answerColumn) : undefined;
+    const promptCandidate = promptColumn ? master(rowNumber, promptColumn) : undefined;
+    const promptCell = promptCandidate && promptCandidate.address !== answerCell?.address
+      && (!questionColumn || promptCandidate.address !== master(rowNumber, questionColumn).address)
+      ? promptCandidate : undefined;
     if (questionColumn && isFormula(master(rowNumber,questionColumn).value)) throw new DomainError(422,'FORMULA_IDENTITY','題號不能使用公式，請改為明確文字或數字。');
     const answerRaw = answerCell ? cellValue(rowNumber, answerColumn) : '';
     const cells = row.values as unknown[];
@@ -69,7 +66,7 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
     let targetNote = '';
     for (let column = 1; column < cells.length; column += 1) {
       const cell = master(rowNumber,column);
-      if(cell.fullAddress.row !== rowNumber || cell.fullAddress.col !== column) continue;
+      if(cell.fullAddress.row !== rowNumber || cell.fullAddress.col !== column || cell.address === promptCell?.address) continue;
       const cellText = textOf(cell.value).trim();
       const note = notes.get(`${rowNumber}:${column}`) ?? noteOf(cell.note);
       if (cell.address === answerCell?.address) targetNote = note;
@@ -121,10 +118,20 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
       originalType: value === null || value === undefined ? 'blank' : typeof value === 'object' && 'formula' in value ? 'formula' : typeof value === 'object' && 'richText' in value ? 'richText' : typeof value,
       ...(targetNote || markedNote ? { note: targetNote || markedNote } : {}), identitySource,
     };
+    const prompt = promptCell && promptCell.address !== targetCell.address ? textOf(promptCell.value) : '';
+    fill.prompt = hasPrompt(parsed.questionId, prompt) ? prompt : null;
+    if (fill.prompt && promptCell && promptCell.fullAddress.row !== rowNumber) {
+      sharedPrompts.push({ fill, anchorRow: promptCell.fullAddress.row });
+    }
     fills.push(fill);
+    fillsByRow.set(rowNumber, fill);
     let unit = unitMap.get(unitId);
     if (!unit) { unit = { id: unitId, name: unitName, questionIds: [], fillBlankIds: [] }; unitMap.set(unitId, unit); }
     unit.questionIds.push(parsed.questionId); unit.fillBlankIds.push(fillId);
+  }
+  for (const { fill, anchorRow } of sharedPrompts) {
+    const anchor = fillsByRow.get(anchorRow);
+    if (anchor?.unitId !== fill.unitId || anchor.prompt !== fill.prompt) fill.prompt = null;
   }
   if (!fills.length) throw new DomainError(422, 'NO_FILL_BLANKS', '找不到可辨識的填空，請確認學習單含「題號／作答」表頭或答案標記。');
   for (const unit of unitMap.values()) if (unit.fillBlankIds.length === 0) throw new DomainError(422, 'EMPTY_UNIT', `題組「${unit.name}」沒有填空，請修正題目標記。`);

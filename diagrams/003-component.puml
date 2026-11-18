@@ -1,0 +1,39 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName PingFang TC
+skinparam componentStyle rectangle
+title 搶答題目顯示、手動出題與老師補答 · 組件圖
+actor 老師 as Teacher
+actor 學生 as Student
+artifact "本機 XLSX 學習單" as Xlsx
+cloud "Google 工作表" as Google
+artifact "活動結果 CSV" as Csv
+rectangle 課堂活動 {
+  [老師工作台] as TeacherView
+  [學生作答與結果畫面] as StudentView
+  [身分與組別驗證] as Access
+  [工作表匯入] as Import
+  [題目清單] as Questions
+  [回合與收件順位] as Round
+  [自動判分、更正與老師補答] as Review
+  [結果匯出與原稿回填] as Results
+}
+Teacher --> TeacherView
+Student --> StudentView
+TeacherView --> Access
+StudentView --> Access
+Xlsx --> Import
+Google --> Import
+TeacherView --> Import : 匯入與預覽
+Import --> Questions : 題號、題幹、題組及填空
+TeacherView --> Questions : 選題、手動新增、補題幹及設定標準答案
+Questions --> Round : 完整題幹、作答項目及標準答案
+TeacherView --> Round : 開題及停止收件
+StudentView --> Round : 讀取當前題幹與送答
+Round --> Review : 已收答案、順位及固定的標準答案
+TeacherView --> Review : 更正判分、補答及公布
+Review --> StudentView : 已公布結果
+Review --> Results : 已公布的作答與補答
+Results --> Csv : 組別紀錄與老師補答
+Results --> Google : 有原稿位置的勝組答案
+@enduml
