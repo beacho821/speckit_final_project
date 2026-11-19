@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ActivityView, SessionResponse } from '../../shared/api';
 import { activityHeaders, readError } from './api';
-import RoundHistory from './RoundHistory';
+import { questionLabel } from './question-label';
 
 export default function StudentRound({ session, credential, view, syncError = '', refresh, fullSnapshot, onExpired }: { session: SessionResponse; credential: string; view: ActivityView|null; syncError?: string; blocked?: boolean; refresh?: () => void; fullSnapshot?: number; onExpired?: () => void }) {
   const [drafts, setDrafts] = useState<Map<string, string>>(() => new Map());
@@ -43,7 +43,12 @@ export default function StudentRound({ session, credential, view, syncError = ''
         if (submittedRound.current !== roundId) return;
         if (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED') onExpired?.();
         else {
-          setError(issue.message);
+          const missing: unknown = issue.details?.missingQuestionIds;
+          const questions = view.unit.questions ?? [];
+          const labels = issue.code === 'INVALID_ANSWERS' && Array.isArray(missing)
+            ? questions.filter(question => question.questionNumber !== undefined && missing.includes(question.questionId)).map(questionLabel)
+            : [];
+          setError(labels.length ? `${labels.join('、')}尚未填答，請補齊後一起送出。` : issue.message);
           if (issue.code === 'ALREADY_RECEIVED' || issue.code === 'ROUND_EXPIRED') {
             setPending(fullSnapshot ?? 0); refresh?.();
           }
@@ -63,16 +68,16 @@ export default function StudentRound({ session, credential, view, syncError = ''
     : view.phase === 'active' ? '請完成本回合答案'
       : view.phase === 'reviewing' ? '已停止收件，等待老師公布結果'
         : '等待老師準備題目';
+  const labelFor = (id: string) => questionLabel(view.unit?.questions?.find(question => question.questionId === id) ?? { questionId: id });
   return <section className="round-panel student-round"><h2 ref={receiptHeading} tabIndex={-1} aria-live="polite">{title}</h2>
     {syncError && <p className="error" role="status">{syncError}</p>}
-    {view.unit && view.phase !== 'preparing' && <><h3>{view.unit.name || view.unit.questionIds.join('、')}</h3>
+    {view.unit && view.phase !== 'preparing' && <>
       {view.phase === 'active' && !view.received && <><p className="muted">{remainingMs ? `本組有優先送出時段，請稍候 ${Math.ceil(remainingMs / 1000)} 秒；可先填寫答案。` : '請填妥所有題目後一次送出。'}</p>
-        <div className="answer-list">{view.unit.questionIds.map(questionId => <label key={questionId}>{(view.unit!.questionIds.length > 1 || (view.unit!.name && view.unit!.name !== questionId)) && <strong>{questionId}</strong>}<span className="question-prompt">{view.unit?.questions?.find(question => question.questionId === questionId)?.prompt}</span><textarea rows={2} value={drafts.get(questionId) ?? ''} onChange={event => setDrafts(previous => new Map(previous).set(questionId, event.target.value))} /></label>)}</div>
+        <div className="answer-list">{view.unit.questionIds.map(questionId => <label key={questionId}><strong>{labelFor(questionId)}</strong><span className="question-prompt">{view.unit?.questions?.find(question => question.questionId === questionId)?.prompt}</span><textarea rows={2} value={drafts.get(questionId) ?? ''} onChange={event => setDrafts(previous => new Map(previous).set(questionId, event.target.value))} /></label>)}</div>
         {error && <p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy || pending !== undefined || (Boolean(session.classroomId) && remainingMs > 0)} onClick={() => void submit()}>{busy ? '送出中…' : pending !== undefined ? '等待收件確認…' : '送出本組答案'}</button></>}
       {(view.received || view.phase === 'reviewing') && view.unit.questions?.map(question =>
-        <p className="question-prompt" key={question.questionId}><b>{question.questionId}</b> {question.prompt}</p>)}
-      {view.received && <div className="success-box">本組答案已收件。{view.phase !== 'ended' && '請等待老師公布結果。'}{view.ownAnswers?.map(answer => <p key={answer.questionId}>{answer.questionId}：{answer.text}</p>)}</div>}
+        <p className="question-prompt" key={question.questionId}><b>{questionLabel(question)}</b> {question.prompt}</p>)}
+      {view.received && <div className="success-box">本組答案已收件。{view.phase !== 'ended' && '請等待老師公布結果。'}{view.ownAnswers?.map(answer => <p key={answer.questionId}>{labelFor(answer.questionId)}：{answer.text}</p>)}</div>}
     </>}
-    {view.closedRoundIds.length > 0 && <RoundHistory session={session} credential={credential} roundIds={view.closedRoundIds} snapshot={fullSnapshot} />}
   </section>;
 }

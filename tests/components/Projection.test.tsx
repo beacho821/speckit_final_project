@@ -3,8 +3,8 @@ import { expect, it } from 'vitest';
 import { ProjectionDisplay } from '../../frontend/src/Projection';
 import { render, host } from '../helpers/ui';
 
-it('組別投影只有授權後的題目、組名與收件狀態', async () => {
-  await render(<ProjectionDisplay view={{ classroomName: '測試教室', groupName: '甲組', phase: 'active', title: '第一題',
+it('全班投影呈現公開的題目、組名與收件狀態', async () => {
+  await render(<ProjectionDisplay view={{ classroomName: '測試教室', phase: 'active', title: '第一題',
     questions: [{ questionId: '1', prompt: '公開題幹', missingPrompt: false }],
     groups: [{ id: 'g', name: '甲組', received: true }], version: 1 }} />);
   expect(host.textContent).toContain('公開題幹');
@@ -42,38 +42,15 @@ it('全班投影只接受原教師視窗及同源訊息，收到撤銷後清除�
   }
 });
 
-it('組別投影接受 20 秒的正常輪詢，接著未收到回覆時清除畫面', async () => {
-  const { act } = await import('react');
-  const { vi } = await import('vitest');
+it('舊投影入口只顯示教師指引', async () => {
   const { ProjectionEntry } = await import('../../frontend/src/Projection');
-  const { input, click } = await import('../helpers/ui');
   const priorPath = location.pathname;
-  const snapshot = { classroomName: '測試教室', groupName: '甲組', phase: 'idle', questions: [], groups: [], version: 0 };
-  vi.useFakeTimers();
   window.history.replaceState(null, '', '/projection');
   try {
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(Response.json(snapshot))
-      .mockResolvedValueOnce(Response.json(snapshot))
-      .mockImplementationOnce(() => new Promise(resolve => setTimeout(() => resolve(new Response(null, { status: 204 })), 20_000)))
-      .mockImplementation(() => new Promise(() => {}));
-    vi.stubGlobal('fetch', fetch);
     await render(<ProjectionEntry />);
-    await input('投影加入碼', 'GROUP');
-    await click('開啟投影');
-    expect(host.textContent).toContain('測試教室');
-    await act(async () => vi.advanceTimersByTimeAsync(20_000));
-    expect(fetch.mock.calls.at(-1)?.[0]).toBe('/api/projections/group/view?after=0');
-    expect(host.textContent).toContain('測試教室');
-    await act(async () => vi.advanceTimersByTimeAsync(24_999));
-    expect(host.textContent).toContain('測試教室');
-    await act(async () => vi.advanceTimersByTimeAsync(1));
-    expect(host.textContent).not.toContain('測試教室');
-    expect(host.querySelector('[role=alert]')?.textContent).toContain('重新輸入加入碼');
-  } finally {
-    vi.useRealTimers();
-    window.history.replaceState(null, '', priorPath);
-  }
+    expect(host.textContent).toContain('從教室導覽');
+    expect(host.querySelector('input, form')).toBeNull();
+  } finally { window.history.replaceState(null, '', priorPath); }
 });
 
 it('全班投影即使仍有教師心跳，逾時時清除快照並停止輪詢', async () => {

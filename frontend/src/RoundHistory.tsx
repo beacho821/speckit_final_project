@@ -1,48 +1,63 @@
 import { useEffect, useState } from 'react';
-import type { HistoryRound, RoundResultLine, SessionResponse } from '../../shared/api';
-import { activityHeaders, readList, requestMessage, requireOk } from './api';
+import type { HistoryRound, RoundResultLine, SessionResponse, StudentRoundResultLine } from '../../shared/api';
+import { questionLabel } from './question-label';
+import { activityHeaders, ApiRequestError, readError, readList, requestMessage, requireOk } from './api';
 
-export default function RoundHistory(props: { session: SessionResponse; credential: string; roundIds: string[]; snapshot?: number }) {
+export default function RoundHistory(props: { session: SessionResponse; credential: string; roundIds: string[]; snapshot?: number; onExpired?: () => void }) {
   return props.session.role === 'teacher' && props.session.classroomId
     ? <ClassroomHistory {...props} classroomId={props.session.classroomId} />
-    : <ActivityHistory {...props} />;
+    : <StudentHistory {...props} />;
 }
 
-function ActivityHistory({ session, credential, roundIds, snapshot }: { session: SessionResponse; credential: string; roundIds: string[]; snapshot?: number }) {
-  const [history, setHistory] = useState<Array<{ id: string; rows: RoundResultLine[] }>>([]);
+export function StudentHistory({ session, credential, roundIds, snapshot, onExpired }: {
+  session: SessionResponse; credential: string; roundIds: string[]; snapshot?: number; onExpired?: () => void;
+}) {
+  const [history, setHistory] = useState<Array<{ id: string; rows: StudentRoundResultLine[] }>>();
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const roundKey = roundIds.join('|');
   useEffect(() => {
     const controller = new AbortController();
+    const headers = activityHeaders(session, credential);
+    setError('');
     void Promise.all(roundIds.map(async id => {
-      try {
-        const response = await fetch(`/api/rounds/${id}/results`, { headers: activityHeaders(session, credential), signal: controller.signal });
-        return response.ok ? { id, rows: await readList<RoundResultLine>(response) } : null;
-      } catch {
-        return null;
+      const response = await fetch(`/api/rounds/${encodeURIComponent(id)}/results`, { headers, signal: controller.signal });
+      if (!response.ok) {
+        const issue = await readError(response);
+        if (!controller.signal.aborted && (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED')) onExpired?.();
+        if (response.status >= 500 && !issue.code) throw new Error();
+        throw new ApiRequestError(issue.message);
       }
-    })).then(results => {
-      if (!controller.signal.aborted) setHistory(previous => roundIds.flatMap((id, index) => {
-        const result = results[index] ?? previous.find(entry => entry.id === id);
-        return result ? [result] : [];
-      }));
-    });
+      const rows = await readList<StudentRoundResultLine>(response);
+      if (rows.some(row => !row || !Number.isSafeInteger(row.questionNumber)
+        || (row.partNumber !== null && !Number.isSafeInteger(row.partNumber))
+        || ![row.prompt, row.ownAnswer, row.publishedAnswer].every(text => text === null || typeof text === 'string')
+        || (row.correct !== null && typeof row.correct !== 'boolean'))) throw new Error();
+      return { id, rows };
+    })).then(results => { if (!controller.signal.aborted) setHistory(results); })
+      .catch(cause => {
+        if (!controller.signal.aborted) setError(requestMessage(cause, '歷史紀錄載入失敗，請確認連線後重新載入。'));
+      });
     return () => controller.abort();
-  }, [roundIds.join('|'), session.activityId, session.role, session.groupId, credential, snapshot]);
+  }, [roundKey, session, credential, snapshot, retry, onExpired]);
 
-  if (!history.length) return null;
-  return <div className="results-list">{history.map(round => {
-    const first = round.rows[0];
-    const winner = first?.groups.find(group => group.groupId === first.winnerGroupId);
-    return <article key={round.id}>
-      <strong>已公布回合</strong>
-      <p>{winner ? `勝組：${winner.groupName}` : '無勝組'}</p>
-      <ResultRows rows={round.rows} />
-    </article>;
-  })}</div>;
+  return <section className="student-history">
+    <h2>歷史紀錄</h2>
+    {error && <p className="error" role="alert">{error} <button className="secondary-button" onClick={() => setRetry(value => value + 1)}>重新載入</button></p>}
+    {roundIds.length === 0 ? <p className="muted">目前還沒有公布的答案。</p> :
+      !history && !error && <p role="status">正在載入歷史紀錄…</p>}
+    <div className="results-list">{history?.filter(round => roundIds.includes(round.id)).map(round =>
+      <div key={round.id}>{round.rows.map((item, index) => <article className="student-history-item" key={index}>
+        <h3>{questionLabel(item)}　{item.prompt}</h3>
+        <p>已回答：{item.ownAnswer ?? '未作答'}</p>
+        <p className="published-answer">{item.correct ? '正確' : `正確答案：${item.publishedAnswer ?? '未提供'}`}</p>
+      </article>)}</div>)}</div>
+  </section>;
 }
 
 function ResultRows({ rows }: { rows: RoundResultLine[] }) {
   return <>{rows.map(row => <div className="history-question" key={row.questionId}>
-        <p className="question-prompt"><b>{row.questionId}</b> {row.prompt}</p>
+        <p className="question-prompt"><b>{questionLabel(row)}</b> {row.prompt}</p>
         {row.groups.map(group => <p className="question-prompt" key={group.groupId}>
           <span>{group.groupName} · {group.status}</span>
           {group.rank !== null ? ` · 第 ${group.rank} 順位` : ''}
@@ -103,7 +118,7 @@ function HistoryDetail({ base, round, session, credential }: { base: string; rou
     return () => controller.abort();
   }, [opened, rows, base, round.activityId, round.roundId, session, credential, retry]);
   return <details onToggle={event => setOpened(event.currentTarget.open)}>
-    <summary>{round.title} · {round.winnerGroupName ? '勝組 ' + round.winnerGroupName : '無勝組'}</summary>
+    <summary>{round.questionNumber === undefined ? round.title : questionLabel(round)} · {round.winnerGroupName ? '勝組 ' + round.winnerGroupName : '無勝組'}</summary>
     {rows ? <ResultRows rows={rows} />
       : error ? <p role="alert">{error} <button className="secondary-button" onClick={() => { setError(''); setRetry(value => value + 1); }}>重試</button></p>
         : <p role="status">正在載入答案…</p>}

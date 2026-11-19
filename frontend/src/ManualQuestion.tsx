@@ -1,27 +1,57 @@
-import { useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 
-export default function ManualQuestion({ disabled, onAdd }: {
+export default function ManualQuestion({ disabled, onAdd, error }: {
   disabled: boolean;
-  onAdd: (questionId: string, prompt: string) => Promise<boolean>;
+  onAdd: (prompt: string, acceptedAnswersText: string) => Promise<boolean>;
+  error?: string;
 }) {
-  const [questionId, setQuestionId] = useState('');
+  const dialog = useRef<HTMLDialogElement>(null);
+  const launcher = useRef<HTMLButtonElement>(null);
+  const title = useId();
   const [prompt, setPrompt] = useState('');
+  const [answers, setAnswers] = useState('');
+  const [attempted, setAttempted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  function reset() {
+    setPrompt(''); setAnswers(''); setAttempted(false); setFailed(false);
+    launcher.current?.focus();
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (disabled || !questionId.trim() || !prompt.trim()) return;
-    if (await onAdd(questionId, prompt)) {
-      setQuestionId('');
-      setPrompt('');
+    setAttempted(true);
+    if (disabled || saving || !prompt.trim() || !answers.trim()) {
+      const field = event.currentTarget.querySelector<HTMLTextAreaElement>(!prompt.trim() ? '[name="prompt"]' : '[name="answers"]');
+      field?.focus();
+      return;
     }
+    setSaving(true); setFailed(false);
+    try {
+      if (await onAdd(prompt, answers)) dialog.current?.close();
+      else setFailed(true);
+    } finally { setSaving(false); }
   }
 
-  return <form className="form-stack question-editor" onSubmit={event => void submit(event)}>
-    <fieldset className="form-stack" disabled={disabled}>
-      <legend>手動新增單題</legend>
-      <label>題號<input required value={questionId} onChange={event => setQuestionId(event.target.value)} /></label>
-      <label>題目<textarea rows={3} required value={prompt} onChange={event => setPrompt(event.target.value)} /></label>
-      <button className="secondary-button" disabled={!questionId.trim() || !prompt.trim()}>新增題目</button>
-    </fieldset>
-  </form>;
+  return <>
+    <button ref={launcher} className="primary" disabled={disabled} onClick={() => dialog.current?.showModal()}>新增題目</button>
+    <dialog ref={dialog} className="work-dialog" aria-labelledby={title} onClose={reset}
+      onCancel={event => { if (saving) event.preventDefault(); }}>
+      <h2 id={title}>新增題目</h2>
+      <form className="form-stack" noValidate onSubmit={event => void submit(event)}>
+        <label>題幹<textarea name="prompt" autoFocus required rows={3} value={prompt} aria-invalid={attempted && !prompt.trim()}
+          onChange={event => setPrompt(event.target.value)} /></label>
+        {attempted && !prompt.trim() && <p className="error" role="alert">請填寫題幹。</p>}
+        <label>標準答案（一行一種答案）<textarea name="answers" required rows={3} value={answers} aria-invalid={attempted && !answers.trim()}
+          onChange={event => setAnswers(event.target.value)} /></label>
+        {attempted && !answers.trim() && <p className="error" role="alert">請填寫至少一個標準答案。</p>}
+        {failed && <p className="error" role="alert">{error || '題目未能儲存，請核對目前資料後再試。'}</p>}
+        <div className="row-actions">
+          <button type="button" className="secondary-button" disabled={saving} onClick={() => dialog.current?.close()}>取消</button>
+          <button className="primary" disabled={disabled || saving}>{saving ? '儲存中…' : '儲存題目'}</button>
+        </div>
+      </form>
+    </dialog>
+  </>;
 }

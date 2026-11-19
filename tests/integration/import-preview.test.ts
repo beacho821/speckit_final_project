@@ -1,3 +1,4 @@
+import { worksheetHeaders } from '../helpers/classroom';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../backend/src/app.js';
 import { identifyWorksheet } from '../../backend/src/worksheet/identify.js';
@@ -29,14 +30,14 @@ describe('樣本學習單匯入入口', () => {
     ];
     let previous: typeof activity.worksheet = null;
     for (const expected of expectations) {
-      const response = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: expected.url }) });
+      const response = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, ...worksheetHeaders(activity), 'Content-Type': 'application/json' }, body: JSON.stringify({ url: expected.url }) });
       expect(response.status).toBe(200);
       const preview = await response.json() as { unitCount: number; fillCount: number; units: Array<{ questionIds: string[] }> };
       expect(preview.unitCount).toBe(expected.unitCount); expect(preview.fillCount).toBe(expected.fillCount);
       expect(preview.units.flatMap(unit => unit.questionIds)).toEqual(expected.questionIds);
       previous = activity.worksheet;
     }
-    const invalid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'invalid' }) });
+    const invalid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, ...worksheetHeaders(activity), 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'invalid' }) });
     expect(invalid.status).toBe(422); expect(activity.worksheet).toBe(previous);
   });
 });
@@ -45,7 +46,7 @@ it('慢速raw上傳不能覆寫較新Google匯入；成功清準備回合保留�
  const {classroom}=await import('../helpers/classroom');const {variant}=await import('../fixtures/xlsx-variants');const {request}=await import('node:http');
  const c=await classroom({importWorksheet:async url=>({worksheet:{source:{kind:'google',documentId:String(url),sheetId:1,sheetTitle:'隔離來源',importedAt:0},...identifyWorksheet((await makeSimpleWorksheet()).sheet)}})});
  try{const g=await c.group('甲'),s=await c.student(g.joinCode);await c.request('/worksheet/import',c.teacher,{url:'old'},'POST');const unit=c.activity.worksheet!.units[0];const prepared=await(await c.request('/rounds',c.teacher,{unitId:unit.id},'POST')).json();
- const bytes=await variant();let upload:ReturnType<typeof request>;const result=new Promise<number>((resolve,reject)=>{upload=request(c.base+'/api/worksheet/import/xlsx',{method:'POST',headers:{...c.teacher,'Content-Type':'application/octet-stream','X-File-Name':'local.xlsx','Content-Length':String(bytes.length)}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode!));});upload.on('error',reject);upload.write(bytes.subarray(0,100));});
+ const bytes=await variant();let upload:ReturnType<typeof request>;const result=new Promise<number>((resolve,reject)=>{upload=request(c.base+'/api/worksheet/import/xlsx',{method:'POST',headers:{...c.teacher,...worksheetHeaders(c.activity),'Content-Type':'application/octet-stream','X-File-Name':'local.xlsx','Content-Length':String(bytes.length)}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode!));});upload.on('error',reject);upload.write(bytes.subarray(0,100));});
  const generation=c.activity.importGeneration;for(let i=0;i<50&&c.activity.importGeneration===generation;i++)await new Promise(r=>setTimeout(r,5));
  expect((await c.request('/worksheet/import',c.teacher,{url:'new'},'POST')).status).toBe(200);upload!.end(bytes.subarray(100));expect(await result).toBe(409);expect(c.activity.worksheet!.source).toMatchObject({kind:'google',documentId:'new'});expect(c.activity.rounds).toHaveLength(0);expect((await c.request(`/rounds/${prepared.id}/start`,c.teacher,undefined,'POST')).status).toBe(409);expect(c.activity.joinCodes.get(g.id)).toBe(g.joinCode);expect(c.activity.members.has(s.session.memberId)).toBe(true);
  }finally{await c.close();}
@@ -67,7 +68,7 @@ it.each(['single','mixed'] as const)('同一份資料從模擬 Google 與本機 
   try {
     const remote = await c.request('/worksheet/import',c.teacher,{url:'fixture'},'POST');
     expect(remote.status).toBe(200);
-    const local = await fetch(c.base+'/api/worksheet/import/xlsx',{method:'POST',headers:{...c.teacher,'Content-Type':'application/octet-stream','X-File-Name':'reference.xlsx'},body:bytes});
+    const local = await fetch(c.base+'/api/worksheet/import/xlsx',{method:'POST',headers:{...c.teacher,...worksheetHeaders(c.activity),'Content-Type':'application/octet-stream','X-File-Name':'reference.xlsx'},body:bytes});
     expect(local.status).toBe(200);
     const [google, xlsx] = await Promise.all([remote.json(),local.json()]);
     expect(xlsx.units).toEqual(google.units);

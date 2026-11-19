@@ -1,3 +1,4 @@
+import { worksheetHeaders } from '../helpers/classroom';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../backend/src/app.js';
 import { DomainError } from '../../backend/src/rounds.js';
@@ -31,7 +32,7 @@ beforeAll(async () => { server = app.listen(0, '127.0.0.1'); await new Promise<v
 afterAll(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 
 async function importRequest(url: string, sheetId?: number) {
-  return fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url, ...(sheetId === undefined ? {} : { sheetId }) }) });
+  return fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, ...worksheetHeaders(activity), 'Content-Type': 'application/json' }, body: JSON.stringify({ url, ...(sheetId === undefined ? {} : { sheetId }) }) });
 }
 
 describe('學習單匯入契約', () => {
@@ -65,7 +66,7 @@ describe('學習單匯入契約', () => {
     const before = activity.worksheet;
     const failed = await importRequest('broken');
     expect(failed.status).toBe(502); expect((await failed.json()).message).toContain('檢查權限'); expect(activity.worksheet).toBe(before);
-    const badGid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'multi', sheetId: -1 }) });
+    const badGid = await fetch(`${base}/api/worksheet/import`, { method: 'POST', headers: { Authorization: auth, ...scope, ...worksheetHeaders(activity), 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'multi', sheetId: -1 }) });
     expect(badGid.status).toBe(422); expect(activity.worksheet).toBe(before);
   });
   it('較早發出的非同步匯入不能覆蓋較新的來源', async () => {

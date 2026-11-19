@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { changed, type Activity } from './activity.js';
+import { catalogChanged, type Activity } from './activity.js';
 import { DomainError } from './rounds.js';
 import type { CatalogUnit, QuestionPreview, RoundQuestion, Worksheet } from '../../shared/api.js';
 
@@ -64,7 +64,7 @@ export function updateQuestion(activity: Activity, key: string, input: unknown):
     throw new DomainError(409, 'QUESTION_REVISION_CHANGED', '題目已更新，請核對最新內容後再儲存。');
   }
   if (prompt !== undefined && !hasPrompt(question.questionId, prompt)) {
-    throw new DomainError(422, 'INVALID_PROMPT', `第 ${question.questionId} 題缺少題目，請輸入完整題幹。`);
+    throw new DomainError(422, 'INVALID_PROMPT', `缺少題目，請輸入完整題幹。`);
   }
   if (acceptedAnswersText !== undefined && typeof acceptedAnswersText !== 'string') {
     throw new DomainError(422, 'INVALID_ACCEPTED_ANSWERS', '標準答案須輸入文字，一行一種答案。');
@@ -77,7 +77,7 @@ export function updateQuestion(activity: Activity, key: string, input: unknown):
     question.acceptedAnswers = acceptedAnswersText.split(/\r\n|\r|\n/).map(answer => answer.trim()).filter(Boolean);
   }
   ++question.questionRevision;
-  changed(activity, ['teacher']);
+  catalogChanged(activity);
   return question;
 }
 
@@ -89,19 +89,18 @@ function assertQuestionEditingAllowed(activity: Activity) {
 
 export function addManualQuestion(activity: Activity, input: unknown): RoundQuestion {
   assertQuestionEditingAllowed(activity);
-  const { questionId: rawId, prompt } = (input ?? {}) as Record<string, unknown>;
-  const questionId = typeof rawId === 'string' ? rawId.trim() : '';
-  if (!questionId) throw new DomainError(422, 'INVALID_QUESTION_ID', '請輸入手動題目的題號。');
-  if (!hasPrompt(questionId, prompt)) throw new DomainError(422, 'INVALID_PROMPT', '請填寫完整題幹，避免只填入題號。');
-  if (activity.units.some(unit => unit.questions.some(question => question.questionId === questionId))) {
-    throw new DomainError(409, 'DUPLICATE_QUESTION', `題號 ${questionId} 已存在，請換一個題號。`, { questionIds: [questionId] });
-  }
+  const { prompt, acceptedAnswersText } = (input ?? {}) as Record<string, unknown>;
   const unitId = randomUUID();
+  if (!hasPrompt(unitId, prompt)) throw new DomainError(422, 'INVALID_PROMPT', '請填寫完整題幹。');
+  const acceptedAnswers = typeof acceptedAnswersText === 'string'
+    ? acceptedAnswersText.split(/\r\n|\r|\n/).map(answer => answer.trim()).filter(Boolean) : [];
+  if (!acceptedAnswers.length) throw new DomainError(422, 'INVALID_ACCEPTED_ANSWERS', '請填寫至少一個標準答案，一行一種答案。');
   const question: RoundQuestion = {
-    questionId, prompt, unitId, origin: 'manual', questionKey: randomUUID(),
-    missingPrompt: false, acceptedAnswers: [], questionRevision: 0,
+    questionId: unitId, prompt, unitId, origin: 'manual', questionKey: randomUUID(),
+    missingPrompt: false, acceptedAnswers, questionRevision: 0,
   };
-  activity.units.push({ id: unitId, name: questionId, questions: [question] });
-  changed(activity, ['teacher']);
+  activity.units.push({ id: unitId, name: '手動題', questions: [question] });
+  activity.queueUnitIds.push(unitId);
+  catalogChanged(activity);
   return question;
 }

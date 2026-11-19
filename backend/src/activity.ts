@@ -12,6 +12,8 @@ export interface Activity {
   worksheet: Worksheet | null;
   units: CatalogUnit[];
   rounds: Round[];
+  queueUnitIds: string[];
+  catalogRevision: number;
   version: number;
   viewVersions: Record<string, number>;
   importGeneration: number;
@@ -19,7 +21,7 @@ export interface Activity {
 }
 
 export function createActivity(): Activity {
-  return { id: randomUUID(), groups: [], joinCodes: new Map(), usedJoinCodes: new Set(), members: new Map(), rosterVersion: 0, rosterLocked: false, worksheet: null, units: [], rounds: [], version: 0, viewVersions: {}, importGeneration: 0, writebackInProgress: false };
+  return { id: randomUUID(), groups: [], joinCodes: new Map(), usedJoinCodes: new Set(), members: new Map(), rosterVersion: 0, rosterLocked: false, worksheet: null, units: [], rounds: [], queueUnitIds: [], catalogRevision: 0, version: 0, viewVersions: {}, importGeneration: 0, writebackInProgress: false };
 }
 
 export function changed(activity: Activity, visibleTo: string[] = ['teacher', ...activity.groups.map(group => `student:${group.id}`)]) {
@@ -27,8 +29,11 @@ export function changed(activity: Activity, visibleTo: string[] = ['teacher', ..
   for (const key of visibleTo) activity.viewVersions[key] = (activity.viewVersions[key] ?? 0) + 1;
 }
 
-export function projectionChanged(activity: Activity, groupId?: string) {
-  for (const key of ['projection', ...(groupId ? [`projection:${groupId}`] : activity.groups.map(group => `projection:${group.id}`))]) {
-    activity.viewVersions[key] = (activity.viewVersions[key] ?? 0) + 1;
-  }
+export function projectionChanged(activity: Activity) {
+  activity.viewVersions.projection = (activity.viewVersions.projection ?? 0) + 1;
+}
+
+export function catalogChanged(activity: Activity, visibleTo = ['teacher']) {
+  activity.catalogRevision++;
+  changed(activity, visibleTo);
 }

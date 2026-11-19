@@ -4,4 +4,57 @@ it('學生欄位為加入碼與名稱、切角色清輸入；晚登入不能覆�
 it('沒有品牌或舊術語且教師密碼不存 Web Storage',async()=>{sessionStorage.clear();vi.spyOn(globalThis,'fetch').mockImplementation(async(input)=>String(input).startsWith('/api/view')?new Promise(()=>{}):Response.json(String(input)==='/api/classrooms'?[]:{role:'teacher'}));await render(<App/>);expect(host.textContent).not.toMatch(/課堂線上搶答|憑證|組別代碼/);await input('教師密碼','temporary-password');await click('登入活動');await flush();expect(host.textContent).toContain('我的教室');expect(sessionStorage.length).toBe(0);expect(localStorage.length).toBe(0);});
 
 it('重新整理先驗證；恢復中切角色會清除暫存並忽略晚成功',async()=>{const {SESSION_KEY}=await import('../../frontend/src/session');sessionStorage.setItem(SESSION_KEY,JSON.stringify({version:1,activityId:'old',joinCode:'ABCDEFGH',studentName:'小明',memberId:'m'}));let resolve:(r:Response)=>void=()=>{};const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(()=>new Promise(r=>{resolve=r;}));await render(<App/>);expect(host.textContent).toContain('正在驗證');expect(host.textContent).not.toContain('學生工作台');expect(new Headers(fetch.mock.calls[0][1]?.headers).get('X-Activity-Id')).toBe('old');await click('老師');resolve(Response.json({role:'student',activityId:'old',groupId:'g',memberId:'m',studentName:'小明'}));await flush();expect(sessionStorage.length).toBe(0);expect(host.textContent).not.toContain('學生工作台');});
-it('匯入回應遺失後完整快照恢復新來源，離線維持待確認且不重送POST',async()=>{sessionStorage.clear();let full=0,posts=0;const oldPreview={source:{kind:'xlsx',fileName:'舊.xlsx',sheetId:1,sheetTitle:'舊',importedAt:1},mainQuestionCount:1,fillCount:1,unitCount:1,units:[{id:'old',name:'舊題',questionIds:['1']}]};const base={phase:'idle',roundId:null,unit:null,closedRoundIds:[],version:1,rosterVersion:0,availableUnits:[{unitId:'old',questionIds:['1']}],worksheetPreview:oldPreview};vi.spyOn(globalThis,'fetch').mockImplementation(async(url,init)=>{if(String(url)==='/api/sessions')return Response.json({role:'teacher'});if(String(url)==='/api/classrooms')return Response.json([{id:'room',name:'測試教室',phase:'idle',updatedAt:1}]);if(String(url)==='/api/classrooms/room')return Response.json({id:'room',classroomId:'room',activityId:'a',activityEpoch:'e',name:'測試教室',phase:'idle',updatedAt:1});if(String(url)==='/api/roster')return Response.json({groups:[],locked:false,rosterVersion:0});if(String(url)==='/api/worksheet/import'){posts++;throw new TypeError();}if(String(url).includes('after='))return new Promise((_,reject)=>init?.signal?.addEventListener('abort',()=>reject(new Error())));full++;if(full===2)throw new TypeError();return Response.json(full===1?base:{...base,version:2,worksheetPreview:{...oldPreview,source:{...oldPreview.source,fileName:'新.xlsx',importedAt:2}}});});await render(<App/>);await input('教師密碼','test');await click('登入活動');await flush();await click('恢復主持');await flush();await input('Google 試算表網址','https://docs.google.com/test');await click('匯入並預覽');await flush();expect(host.textContent).toContain('匯入結果待確認');expect([...host.querySelectorAll('button')].find(b=>b.textContent==='匯入並預覽')?.disabled).toBe(true);await flush(850);expect(host.textContent).toContain('新.xlsx');expect(host.textContent).not.toContain('匯入結果待確認');expect(posts).toBe(1);});
+it('匯入回應遺失後完整快照恢復新來源，離線維持待確認且不重送POST',async()=>{sessionStorage.clear();let full=0,posts=0;const oldPreview={source:{kind:'xlsx',fileName:'舊.xlsx',sheetId:1,sheetTitle:'舊',importedAt:1},mainQuestionCount:1,fillCount:1,unitCount:1,units:[{id:'old',name:'舊題',questionIds:['1']}]};const base={phase:'idle',roundId:null,unit:null,closedRoundIds:[],version:1,rosterVersion:0,catalogRevision:0,availableUnits:[{unitId:'old',questionIds:['1']}],worksheetPreview:oldPreview};vi.spyOn(globalThis,'fetch').mockImplementation(async(url,init)=>{if(String(url)==='/api/sessions')return Response.json({role:'teacher'});if(String(url)==='/api/classrooms')return Response.json([{id:'room',name:'測試教室',phase:'idle',updatedAt:1}]);if(String(url)==='/api/classrooms/room')return Response.json({id:'room',classroomId:'room',activityId:'a',activityEpoch:'e',name:'測試教室',phase:'idle',updatedAt:1});if(String(url)==='/api/roster')return Response.json({groups:[],locked:false,rosterVersion:0});if(String(url)==='/api/worksheet/import'){posts++;throw new TypeError();}if(String(url).includes('after='))return new Promise((_,reject)=>init?.signal?.addEventListener('abort',()=>reject(new Error())));full++;if(full===2)throw new TypeError();return Response.json(full===1?base:{...base,version:2,worksheetPreview:{...oldPreview,source:{...oldPreview.source,fileName:'新.xlsx',importedAt:2}}});});await render(<App/>);await input('教師密碼','test');await click('登入活動');await flush();await click('恢復主持');await flush();await input('Google 試算表網址','https://docs.google.com/test');await click('匯入並預覽');await click('確認重新匯入');await flush();expect(host.textContent).toContain('匯入結果待確認');expect([...host.querySelectorAll('button')].find(b=>b.textContent==='匯入並預覽')?.disabled).toBe(true);await flush(850);expect(host.textContent).toContain('新.xlsx');expect(host.textContent).not.toContain('匯入結果待確認');expect(posts).toBe(1);});
+
+it('匯入結果不明時，先前連線恢復的快照不能解除開題鎖定', async () => {
+  const { act } = await import('react');
+  sessionStorage.clear();
+  history.replaceState(null, '', '/');
+  const view = {
+    phase: 'idle', roundId: null, unit: null, closedRoundIds: [], version: 1, catalogRevision: 1, rosterVersion: 0,
+    queueUnitIds: ['u'], nextUnitId: 'u', groups: [{ id: 'g', name: '甲組', received: false }],
+    questionCards: [{ id: 'u', opened: false, name: '手動題', questions: [
+      { questionKey: 'q', origin: 'manual', prompt: '題幹', missingPrompt: false, acceptedAnswers: ['答案'] },
+    ] }],
+  };
+  let lost!: (error: Error) => void;
+  let synced!: (response: Response) => void;
+  let fullReads = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    switch (String(url)) {
+      case '/api/sessions': return Response.json({ role: 'teacher' });
+      case '/api/classrooms': return Response.json([{ id: 'room', name: '測試教室', phase: 'idle', updatedAt: 1 }]);
+      case '/api/classrooms/room': return Response.json({ id: 'room', classroomId: 'room', activityId: 'a', activityEpoch: 'e', name: '測試教室', phase: 'idle' });
+      case '/api/roster': return Response.json({ groups: [], locked: false, rosterVersion: 0 });
+      case '/api/worksheet/import': return new Promise((_, reject) => { lost = reject; });
+      case '/api/view':
+        fullReads++;
+        return fullReads <= 2 ? Response.json(view) : new Promise(resolve => { synced = resolve; });
+      default: return new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(new Error())));
+    }
+  });
+  await render(<App />);
+  await input('教師密碼', 'test');
+  await click('登入活動');
+  await flush();
+  await click('恢復主持');
+  await flush();
+  await input('Google 試算表網址', 'https://docs.google.com/test');
+  await click('匯入並預覽');
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  expect(fullReads).toBe(2);
+  await act(async () => lost(new TypeError('offline')));
+  expect(fullReads).toBe(3);
+  expect(host.textContent).toContain('匯入結果待確認');
+  const consoleLink = [...host.querySelectorAll('nav a')].find(link => link.textContent === '老師控制台') as HTMLAnchorElement;
+  await act(async () => consoleLink.click());
+  const open = () => [...host.querySelectorAll('button')].find(button => button.textContent === '開放搶答')!;
+  expect(open().disabled).toBe(true);
+  await act(async () => synced(Response.json({ version: 2 })));
+  expect(open().disabled).toBe(true);
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  expect(fullReads).toBe(4);
+  await act(async () => synced(Response.json(view)));
+  expect(open().disabled).toBe(false);
+  expect(host.textContent).not.toContain('匯入結果待確認');
+});

@@ -20,7 +20,7 @@ it('收件保存後可由另一進程恢復審核，轉換存檔失敗時只停�
     const question = await (await c.request('/questions', c.teacher, { questionId: '1', prompt: '請輸入本題答案。' }, 'POST')).json();
     const round = await (await c.request('/rounds', c.teacher, { unitId: question.unitId }, 'POST')).json();
     expect((await c.startConfiguredRound(round.id)).status).toBe(200);
-    expect((await c.request('/rounds/' + round.id + '/submissions', student.headers, { answers: [{ questionId: '1', text: '答案' }] }, 'POST')).status).toBe(201);
+    expect((await c.request('/rounds/' + round.id + '/submissions', student.headers, { answers: [{ questionId: question.questionId, text: '答案' }] }, 'POST')).status).toBe(201);
     const savedFile = join(path, c.room.id + '.json');
     const before = await readFile(savedFile, 'utf8');
     const incomplete = await openClassroomStorage(path);
@@ -69,7 +69,7 @@ it('兩間各兩組與兩筆定案在重啟後保留，刪除其中一間後另�
         expect((await c.startConfiguredRound(round.id)).status).toBe(200);
         const delayed = c.activity.rounds.at(-1)?.openAtByGroup[group.id] ?? 0;
         await new Promise(resolve => setTimeout(resolve, Math.max(0, Math.ceil(delayed - performance.now()))));
-        const answer = await c.request('/rounds/' + round.id + '/submissions', student.headers, { answers: [{ questionId, text: '答案' }] }, 'POST');
+        const answer = await c.request('/rounds/' + round.id + '/submissions', student.headers, { answers: [{ questionId: question.questionId, text: '答案' }] }, 'POST');
         expect(answer.status).toBe(201);
         await c.finishRound(round.id);
       }
@@ -80,7 +80,7 @@ it('兩間各兩組與兩筆定案在重啟後保留，刪除其中一間後另�
     for (const id of [a.room.id, b.room.id]) {
       const room = restored.get(id);
       expect(room.activity.groups.map(group => group.name)).toEqual(['乙組', '甲組']);
-      expect(restored.history(room)).toHaveLength(2);
+      expect(restored.history(room).map(entry => entry.questionNumber)).toEqual([2, 1]);
       for (const round of room.activity.rounds) expect(round.submissions[0]).toMatchObject({ rank: 1, answers: [{ text: '答案', autoCorrect: true }] });
     }
     expect(restored.lookup(oldCode)).toBeUndefined();
@@ -90,3 +90,61 @@ it('兩間各兩組與兩筆定案在重啟後保留，刪除其中一間後另�
     expect(afterDelete.history(afterDelete.get(b.room.id))).toHaveLength(2);
   } finally { await a.close(); await b.close(); await rm(directory, { recursive: true, force: true }); }
 }, 10000);
+
+it('刪除舊版準備題以單次存檔清除回合與題卡，失敗後可重試並重啟', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'classroom-prepared-delete-'));
+  const password = randomUUID();
+  let c: Awaited<ReturnType<typeof classroom>> | undefined;
+  try {
+    const storage = await openClassroomStorage(directory);
+    let rejectUpdate = false;
+    const initial = await Classrooms.restore({
+      ...storage,
+      async save(record) {
+        if (rejectUpdate) throw new Error('故障');
+        for (const entry of record.activities) delete entry.queueUnitIds;
+        await storage.save(record);
+      },
+    }, password);
+    c = await classroom({}, initial, password);
+    await c.group();
+    const create = async (prompt: string) =>
+      (await c!.request('/questions', c!.teacher, { prompt, acceptedAnswersText: '答案' }, 'POST')).json();
+    const first = await create('將刪除的舊準備題');
+    const next = await create('下一題');
+    await c.request('/rounds', c.teacher, { unitId: first.unitId }, 'POST');
+    const roomId = c.room.id;
+    await c.close();
+    c = undefined;
+    const loadedStorage = await openClassroomStorage(directory);
+    rejectUpdate = true;
+    const restored = await Classrooms.restore({
+      ...loadedStorage,
+      async save(record) {
+        if (record.id === roomId && rejectUpdate) throw new Error('故障');
+        await loadedStorage.save(record);
+      },
+    }, password);
+    c = await classroom({}, restored, password);
+    const old = restored.get(roomId).activity;
+    const teacher = { ...c.teacher, 'X-Classroom-Id': roomId, 'X-Activity-Id': old.id };
+    const remove = () => c!.rawRequest('/questions/units/' + first.unitId, teacher, { catalogRevision: 0 }, 'DELETE');
+    expect((await remove()).status).toBe(503);
+    expect(old.queueUnitIds).toEqual([first.unitId, next.unitId]);
+    expect(old.rounds[0]?.unitId).toBe(first.unitId);
+    expect((await remove().then(r => r.json())).code).toBe('CLASSROOM_SAVE_FAILED');
+    rejectUpdate = false;
+    expect((await remove()).status).toBe(200);
+    expect(old.rounds).toEqual([]);
+    const restarted = await Classrooms.restore(await openClassroomStorage(directory), password);
+    const persisted = restarted.get(roomId).activity;
+    expect(persisted.queueUnitIds).toEqual([next.unitId]);
+    expect(persisted.rounds).toEqual([]);
+    await c.close();
+    c = await classroom({}, restarted, password);
+    const scoped = { ...c.teacher, 'X-Classroom-Id': roomId, 'X-Activity-Id': persisted.id };
+    const opened = await c.rawRequest('/rounds/open-next', scoped, { unitId: next.unitId, catalogRevision: 0 }, 'POST');
+    expect(opened.status).toBe(201);
+    expect(await opened.json()).toMatchObject({ sequenceNumber: 1, phase: 'active' });
+  } finally { await c?.close(); await rm(directory, { recursive: true, force: true }); }
+});

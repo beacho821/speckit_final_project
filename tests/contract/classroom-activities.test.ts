@@ -12,15 +12,14 @@ it('新活動沿用備課與分組，保留歷史答案並撤銷舊碼', async (
     const room = '/classrooms/' + c.room.id;
     expect((await c.request(room + '/activities', c.teacher, undefined, 'POST')).status).toBe(409);
     expect(await (await c.request(room)).json()).toMatchObject({ activityId: c.activity.id, phase: 'active' });
-    expect((await c.request('/rounds/' + round.id + '/submissions', student.headers, { answers: [{ questionId: '1', text: '答案' }] }, 'POST')).status).toBe(201);
+    expect((await c.request('/rounds/' + round.id + '/submissions', student.headers, { answers: [{ questionId: question.questionId, text: '答案' }] }, 'POST')).status).toBe(201);
     expect((await c.request('/rounds/' + round.id + '/end', c.teacher, undefined, 'POST')).status).toBe(200);
     expect((await c.request(room + '/activities', c.teacher, undefined, 'POST')).status).toBe(409);
     expect(await (await c.request(room)).json()).toMatchObject({ activityId: c.activity.id, phase: 'reviewing' });
-    const code = await (await c.request('/groups/' + group.id + '/projection-code', c.teacher, undefined, 'POST')).json();
     const history = room + '/activities/history';
     expect(await (await c.request(history)).json()).toEqual([]);
     expect((await c.request(history, student.headers)).status).toBe(403);
-    expect((await c.request(history, { Authorization: basic('projection', code.code) })).status).toBe(401);
+    expect((await c.request(history, { Authorization: basic('projection', '舊投影憑證') })).status).toBe(401);
     await c.publishReviewedRound(round.id);
     const next = await c.request(room + '/activities', c.teacher, undefined, 'POST');
     expect(next.status).toBe(201);
@@ -28,6 +27,7 @@ it('新活動沿用備課與分組，保留歷史答案並撤銷舊碼', async (
     const teacher = { ...c.teacher, 'X-Activity-Id': location.activityId };
     const roster = await (await c.request('/roster', teacher)).json();
     expect(roster.locked).toBe(false);
+    expect(c.room.activity.queueUnitIds).toEqual([question.unitId]);
     expect(roster.groups[0].name).toBe(group.name);
     expect((await c.request('/groups/' + group.id, teacher, { name: '改名' }, 'PATCH')).status).toBe(200);
     const archived = await (await c.request(history, teacher)).json();
@@ -38,6 +38,7 @@ it('新活動沿用備課與分組，保留歷史答案並撤銷舊碼', async (
     const foreign = await c.classrooms.create('另一間教室');
     expect(await (await c.request('/classrooms/' + foreign.id + '/activities/history', teacher)).json()).toEqual([]);
     const old = await (await c.request(room + '/activities/' + c.activity.id + '/rounds/' + round.id + '/results', teacher)).json();
+    expect(old[0]).toMatchObject({ questionNumber: 1, partNumber: null });
     expect(old[0].groups[0]).toMatchObject({ groupName: group.name, answer: '答案', correct: true });
     const oldLogin = await c.request('/sessions', { Authorization: basic('student', group.joinCode) }, { name: '小明' }, 'POST');
     expect(oldLogin.status).toBe(401);

@@ -5,6 +5,7 @@ import type { Activity } from './activity.js';
 import type { RoundQuestion, StudentMember, Worksheet } from '../../shared/api.js';
 
 export type StoredActivity = Pick<Activity, 'id' | 'groups' | 'rosterVersion' | 'rosterLocked' | 'worksheet' | 'units' | 'rounds'> & {
+  queueUnitIds?: string[];
   members: StudentMember[];
   startedAt: number;
   archivedAt?: number;
@@ -138,6 +139,17 @@ function recordFrom(raw: unknown, id: string): ClassroomRecord {
       }
       units.set(unit.id, unit);
     }
+    if (activity.queueUnitIds !== undefined) {
+      const queue = activity.queueUnitIds;
+      if (!Array.isArray(queue) || new Set(queue).size !== queue.length || queue.some(id => !units.has(id))) {
+        throw new Error('出題清單與題庫不一致。');
+      }
+      const manual = activity.units.filter(unit => unit.questions[0]?.origin === 'manual').map(unit => unit.id);
+      if (manual.some((id, index) => queue[queue.length - manual.length + index] !== id)) {
+        throw new Error('手動題的出題順序不一致。');
+      }
+    }
+    let questionNumber = 0;
     if (activity.rounds.filter(round => round.phase !== 'ended').length > (activity.archivedAt === undefined ? 1 : 0)) throw new Error('回合狀態不一致。');
     for (const round of activity.rounds) {
       if (!round || typeof round.id !== 'string' || typeof round.unitId !== 'string'
@@ -146,6 +158,9 @@ function recordFrom(raw: unknown, id: string): ClassroomRecord {
         || (round.phase !== 'preparing' && !Array.isArray(round.questions))
         || (round.phase !== 'ended' && !units.has(round.unitId))
         || !isOptionalText(round.unitName)) throw new Error('回合資料不一致。');
+      if (round.phase !== 'preparing') questionNumber++;
+      if ((round.sequenceNumber !== undefined && (round.phase === 'preparing' || round.sequenceNumber !== questionNumber))
+        || (round.isMultipart !== undefined && typeof round.isMultipart !== 'boolean')) throw new Error('回合題號不一致。');
       const questionIds = checkQuestions(round.questions === undefined ? [] : round.questions, round.unitId);
       const roster = new Set(round.roster.map(group => {
         if (!group || !isText(group.id) || !isText(group.name)) throw new Error('回合組別資料不一致。');

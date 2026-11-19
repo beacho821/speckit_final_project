@@ -51,14 +51,16 @@ describe('學生作答互動', () => {
         await new Promise<void>(resolve => init?.signal?.addEventListener('abort', resolve, { once: true }));
         throw new DOMException('已取消', 'AbortError');
       }
-      return Response.json({ code: 'INVALID_ANSWERS', message: '1（2）尚未填答，請補齊後一起送出。' }, { status: 422 });
+      return Response.json({ code: 'INVALID_ANSWERS', message: '來源題號尚未填答，請補齊後一起送出。', details: { missingQuestionIds: ['1（2）'] } }, { status: 422 });
     });
-    await mount();
+    await mount({ ...baseView, unit: { ...baseView.unit!, questions: baseView.unit!.questionIds.map((questionId, index) => ({
+      questionId, questionNumber: 3, partNumber: index + 1, prompt: '題幹', missingPrompt: false,
+    })) } });
     const first = host!.querySelector('textarea')!;
     await act(async () => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!; setter.call(first, '保留的答案'); first.dispatchEvent(new Event('input', { bubbles: true })); });
     const submit = [...host!.querySelectorAll('button')].find(button => button.textContent?.includes('送出本組答案'))!;
     await act(async () => { submit.click(); await new Promise(resolve => setTimeout(resolve, 10)); });
-    expect(host!.textContent).toContain('1（2）尚未填答'); expect(first.value).toBe('保留的答案'); expect(host!.textContent).not.toContain('本組答案已收件');
+    expect(host!.textContent).toContain('第 3 題，第 2 部分尚未填答'); expect(first.value).toBe('保留的答案'); expect(host!.textContent).not.toContain('本組答案已收件');
   });
 
   it('曾勝組可先填答案，優先時段內拒收仍保留草稿與剩餘時間提示', async () => {
@@ -84,18 +86,52 @@ it('開題後在對應作答欄顯示完整題幹', async () => {
   expect(host!.querySelector('textarea')?.labels?.[0]?.textContent).toContain('請說明裝置的用途。');
 });
 
-it('作答區保留題組名稱、每個小題的題號與完整題幹', async () => {
+it('作答區用實際出題順序及部分序號顯示完整題幹', async () => {
   const questions = [
-    { questionId: '1（1）', prompt: '請用完整句子描述中央處理器的主要工作。', missingPrompt: false },
-    { questionId: '1（2）', prompt: '請列出主記憶體與儲存裝置的差異，並各舉一個例子。', missingPrompt: false },
+    { questionId: '1（1）', questionNumber: 2, partNumber: 1, prompt: '請用完整句子描述中央處理器的主要工作。', missingPrompt: false },
+    { questionId: '1（2）', questionNumber: 2, partNumber: 2, prompt: '請列出主記憶體與儲存裝置的差異，並各舉一個例子。', missingPrompt: false },
   ];
   await mount({ ...baseView, unit: { ...baseView.unit!, name: '電腦硬體', questions } });
-  expect(host!.querySelector('h3')?.textContent).toBe('電腦硬體');
   expect([...host!.querySelectorAll('label')].map(label => label.textContent)).toEqual(
-    questions.map(question => question.questionId + question.prompt),
+    questions.map(question => `第 2 題，第 ${question.partNumber} 部分` + question.prompt),
   );
   await act(async () => root!.render(<StudentRound session={session} credential="alpha" view={{
     ...baseView, unit: { ...baseView.unit!, name: undefined, questions },
   }} />));
-  expect(host!.querySelector('h3')?.textContent).toBe('1（1）、1（2）');
+  expect(host!.textContent).toContain('第 2 題，第 2 部分');
+});
+
+it('歷史載入的網路與解析錯誤以正體中文顯示，可重試並保留業務提示', async () => {
+  const { StudentHistory } = await import('../../frontend/src/RoundHistory');
+  const onExpired = vi.fn();
+  const request = vi.spyOn(globalThis, 'fetch')
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce(new Response('invalid JSON'))
+    .mockResolvedValueOnce(Response.json([null]))
+    .mockResolvedValueOnce(Response.json({ message: 'Bad gateway' }, { status: 502 }))
+    .mockResolvedValueOnce(Response.json({ message: '目前尚未公布。' }, { status: 403 }))
+    .mockResolvedValueOnce(Response.json([{ questionNumber: 1, partNumber: null, prompt: '題幹',
+      ownAnswer: '回答', correct: true, publishedAnswer: null }]))
+    .mockResolvedValueOnce(Response.json({ code: 'ACTIVITY_EXPIRED', message: '活動已結束。' }, { status: 409 }));
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  const show = (snapshot: number) => act(async () => root!.render(
+    <StudentHistory session={session} credential="測試" roundIds={['r']} snapshot={snapshot} onExpired={onExpired} />,
+  ));
+  const retry = () => act(async () => host!.querySelector<HTMLButtonElement>('[role=alert] button')!.click());
+  await show(1);
+  expect(host.textContent).toContain('歷史紀錄載入失敗');
+  expect(host.textContent).not.toContain('Failed to fetch');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await retry();
+    expect(host.textContent).toContain('歷史紀錄載入失敗');
+    expect(host.textContent).not.toContain('Bad gateway');
+  }
+  await retry();
+  expect(host.textContent).toContain('目前尚未公布。');
+  await retry();
+  expect(host.textContent).toContain('已回答：回答');
+  expect(host.querySelector('[role=alert]')).toBeNull();
+  await show(2);
+  expect(request).toHaveBeenCalledTimes(7);
+  expect(onExpired).toHaveBeenCalledOnce();
 });

@@ -1,7 +1,21 @@
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+beforeEach(() => {
+  const prototype = HTMLDialogElement.prototype;
+  if (typeof prototype.showModal === 'function') return;
+  // jsdom 未實作原生對話框，瀏覽器驗收另檢查焦點與模態行為。
+  Object.defineProperties(prototype, {
+    showModal: { configurable: true, value(this: HTMLDialogElement) { this.open = true; } },
+    close: { configurable: true, value(this: HTMLDialogElement) {
+      if (!this.open) return;
+      this.open = false;
+      this.dispatchEvent(new Event('close', { bubbles: true }));
+    } },
+  });
+});
+
 let root: Root | undefined;
 export let host: HTMLDivElement;
 export async function render(node: ReactNode) { if (!root) { host=document.createElement('div'); document.body.append(host); root=createRoot(host); } await act(async()=>root!.render(node)); }

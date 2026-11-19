@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Activity } from './activity.js';
-import { changed, projectionChanged } from './activity.js';
+import { catalogChanged, changed, projectionChanged } from './activity.js';
 import { FAIRNESS_DELAY_MS, openTimes } from './fairness.js';
-import type { Answer, GradeEdit, ReviewView, Round, Submission, TeacherSupplement } from '../../shared/api.js';
+import type { Answer, GradeEdit, ReviewView, Round, RoundQuestion, Submission, TeacherSupplement, Worksheet } from '../../shared/api.js';
 
 export class DomainError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly details?: unknown) { super(message); }
@@ -27,6 +27,22 @@ export function prepareRound(activity: Activity, unitId: unknown): Round {
   return round;
 }
 
+export function multipart(questions: RoundQuestion[], worksheet: Worksheet | null) {
+  if (questions.length > 1) return true;
+  const question = questions[0];
+  return Boolean(question?.origin === 'worksheet' && (
+    worksheet?.fills.some(fill => fill.id === question.fillBlankId && fill.subQuestionId !== undefined)
+    || /[（(]\s*\d+\s*[）)]$/.test(question.questionId)
+  ));
+}
+
+export function roundNumbering(round: Round, index: number) {
+  return {
+    questionNumber: round.sequenceNumber ?? 1,
+    partNumber: (round.isMultipart ?? multipart(round.questions ?? [], null)) ? index + 1 : null,
+  };
+}
+
 export function startRound(activity: Activity, roundId: string, now = performance.now()): Round {
   const round = activity.rounds.find(item => item.id === roundId);
   if (!round || currentRound(activity)?.id !== roundId) throw new DomainError(409, 'ROUND_EXPIRED', '回合已更新，請重新載入教師畫面。');
@@ -44,11 +60,13 @@ export function startRound(activity: Activity, roundId: string, now = performanc
     throw new DomainError(422, 'QUESTION_NOT_READY', `${missing.join('。')}，儲存後再開始搶答。`, { missingPromptQuestionIds, missingAcceptedAnswerQuestionIds });
   }
   round.questions = structuredClone(unit.questions);
+  round.sequenceNumber = activity.rounds.filter(entry => entry.phase !== 'preparing').length + 1;
+  round.isMultipart = multipart(round.questions, activity.worksheet);
   round.phase = 'active'; round.openedAt = now; round.roster = [...activity.groups];
   round.openAtByGroup = openTimes(activity, round, now);
   if (!activity.rosterLocked) activity.rosterVersion++;
   activity.rosterLocked = true;
-  changed(activity);
+  catalogChanged(activity, ['teacher', ...activity.groups.map(group => `student:${group.id}`)]);
   projectionChanged(activity);
   return round;
 }
@@ -77,7 +95,12 @@ export function submitAnswers(activity: Activity, roundId: string, groupId: stri
   const extra = ids.filter(id => !expected.includes(id));
   if (missing.length || extra.length || ids.length !== expected.length) {
     const details = { missingQuestionIds: missing, extraQuestionIds: extra };
-    const message = missing.length ? `${missing.join('、')} 尚未填答，請補齊後一起送出。` : '答案題號與本回合不符，請檢查後再送出。';
+    const labels = missing.map(id => {
+      const { questionNumber, partNumber } = roundNumbering(round, expected.indexOf(id));
+      return partNumber === null ? `第 ${questionNumber} 題` : `第 ${questionNumber} 題，第 ${partNumber} 部分`;
+    });
+    const message = labels.length ? `${labels.join('、')}尚未填答，請補齊後一起送出。`
+      : '答案題號與本回合不符，請檢查後再送出。';
     throw new DomainError(422, 'INVALID_ANSWERS', message, details);
   }
   const submission: Submission = {
@@ -86,7 +109,7 @@ export function submitAnswers(activity: Activity, roundId: string, groupId: stri
   };
   round.submissions.push(submission);
   changed(activity, ['teacher', `student:${groupId}`]);
-  projectionChanged(activity, groupId);
+  projectionChanged(activity);
   return submission;
 }
 

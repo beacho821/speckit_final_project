@@ -1,0 +1,39 @@
+@startuml
+!pragma layout smetana
+title 調整教室操作流程｜課堂資料關係
+skinparam defaultFontName PingFang TC
+class "教室" as Room
+class "全班投影" as Projection {
+  公開階段及題目
+  各組收件狀態
+}
+class "活動" as Activity
+class "題目卡" as Card {
+  題卡識別與題目來源
+  題幹及標準答案
+  題組各部分
+}
+class "出題清單" as Queue {
+  已選學習單題目順序
+  手動題依新增次序置後
+}
+class "挑戰回合" as Round {
+  依實際開放固定題號
+  題幹與部分順序
+  回合狀態
+}
+class "已公布逐題結果" as Result {
+  所屬組別
+  組別答案
+  定案判定
+  可公布的正確答案
+}
+Room "1" -- "1" Projection
+Room "1" o-- "0..*" Activity
+Activity "1" *-- "0..*" Card
+Activity "1" *-- "1" Queue
+Queue "0..1" -- "0..*" Card : 依序選入
+Activity "1" *-- "0..*" Round
+Round "0..*" ..> Card : 開放時擷取快照
+Round "1" *-- "0..*" Result : 定案後公布
+@enduml

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ArchivedRoster, ClassroomLocation, RosterResponse, SessionResponse } from '../../shared/api';
 import { activityHeaders, basicHeader, readList, requestMessage, requireOk } from './api';
 import { useActivityView } from './useActivityView';
-import ClassroomList, { phaseLabels } from './ClassroomList';
+import ClassroomList from './ClassroomList';
 import TeacherRound from './TeacherRound';
 import TeacherResults from './TeacherResults';
 import Roster from './Roster';
@@ -10,7 +10,7 @@ import WorksheetImport from './WorksheetImport';
 
 const rootPath = '/teacher/classrooms';
 type Area = 'settings' | 'groups' | 'console';
-const areaNames: Record<Area, string> = { settings: '教室管理', groups: '分組管理', console: '老師控制台' };
+const areaNames: Record<Area, string> = { groups: '分組管理', settings: '題目管理', console: '老師控制台' };
 
 export default function TeacherPortal({ credential, path, navigate, logout, openProjection }: {
   credential: string; path: string; navigate: (path: string) => void;
@@ -66,15 +66,15 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
   const [roster, setRoster] = useState<RosterResponse>();
   const [error, setError] = useState('');
   const [importBusy, setImportBusy] = useState(false);
-  const [pendingSnapshot, setPendingSnapshot] = useState<number>();
+  const [pendingImportRefresh, setPendingImportRefresh] = useState<number>();
   const [starting, setStarting] = useState(false);
   const changeDialog = useRef<HTMLDialogElement>(null);
   const newActivityButton = useRef<HTMLButtonElement>(null);
   const focus = useRef<HTMLHeadingElement>(null);
   const base = rootPath + '/' + room.id;
   const exitRoom = useCallback(() => navigate(rootPath), [navigate]);
-  const { view, error: syncError, refresh, fullSnapshot } = useActivityView(session, credential, exitRoom);
-  const waitingImport = pendingSnapshot !== undefined && pendingSnapshot >= fullSnapshot;
+  const { view, error: syncError, refresh, fullSnapshot, completedRefresh } = useActivityView(session, credential, exitRoom);
+  const waitingImport = pendingImportRefresh !== undefined && completedRefresh < pendingImportRefresh;
 
   useEffect(() => { focus.current?.focus(); }, [area]);
   useEffect(() => {
@@ -119,37 +119,39 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
       <a href={rootPath} onClick={event => { event.preventDefault(); exitRoom(); }}>返回教室列表</a>
       <h1 ref={focus} tabIndex={-1}>{room.name}</h1>
       <nav className="classroom-nav" aria-label="教室工作區">{(Object.keys(areaNames) as Area[]).map(item =>
-        <a key={item} href={link(item)} aria-current={item === area ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate(link(item)); }}>{areaNames[item]}</a>)}</nav>
+        <a key={item} href={link(item)} aria-current={item === area ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate(link(item)); }}>{areaNames[item]}</a>)}
+        <a className="projection-link" href={base + '/projection'} target="_blank" rel="opener"
+          aria-label="開啟教室投影（新分頁）" onClick={event => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            setError(openProjection(room) ? '' : '瀏覽器阻擋投影視窗，請允許開啟新分頁後再試。');
+          }}>開啟教室投影</a>
+      </nav>
     </header>
     {error && <p className="error work-message" role="alert">{error}</p>}
     {area === 'groups' && <section className="work-panel">
-      {roster ? <Roster {...{ session, credential, roster }} onSave={setRoster} projection />
+      {roster ? <Roster {...{ session, credential, roster }} onSave={setRoster} />
         : !error && <p role="status">正在載入分組…</p>}
       <ArchivedRosters classroomId={room.id} credential={credential} />
     </section>}
-    <div className={area === 'settings' ? 'classroom-settings-grid' : undefined} hidden={area === 'groups'}>
+    <div hidden={area === 'groups'}>
       <div className={area === 'console' ? 'work-panel console-panel' : 'work-panel'}>
-        <div hidden={area !== 'settings'}><WorksheetImport {...{ session, credential }}
-          preview={view?.worksheetPreview ?? null} locked={roster?.locked ?? false}
-          unconfirmed={waitingImport} onBusy={setImportBusy} onPublished={refresh}
-          onUnconfirmed={() => { setPendingSnapshot(fullSnapshot); refresh(); }} onExpired={exitRoom} /></div>
-        <TeacherRound {...{ session, credential, view, syncError, refresh, fullSnapshot }}
+        <div hidden={area !== 'settings'}>{view && <WorksheetImport {...{ session, credential }}
+          catalogRevision={view?.catalogRevision} preview={view?.worksheetPreview ?? null} locked={roster?.locked ?? false}
+          unconfirmed={waitingImport} completedRefresh={completedRefresh} onBusy={setImportBusy} onPublished={refresh}
+          onUnconfirmed={() => setPendingImportRefresh(refresh())} onExpired={exitRoom} />}</div>
+        <TeacherRound {...{ session, credential, view, syncError, refresh, fullSnapshot, completedRefresh }}
           mode={area === 'settings' ? 'settings' : 'console'} blocked={waitingImport || importBusy}
           onSettings={() => navigate(base)} onExpired={exitRoom} />
       </div>
-      {area === 'settings' && <aside className="work-panel classroom-tools">
-        <h2>活動準備</h2>
-        <p className="muted" role="status">{phaseLabels[phase]} · {roster?.groups.length ?? 0} 組</p>
-        <a className="secondary-button" href={link('console')} onClick={event => { event.preventDefault(); navigate(link('console')); }}>前往控制台</a>
-        <a className="secondary-button" href={link('groups')} onClick={event => { event.preventDefault(); navigate(link('groups')); }}>開啟分組管理</a>
-        <button className="secondary-button" onClick={() => setError(openProjection(room) ? '' : '瀏覽器阻擋投影視窗，請允許此頁開啟新視窗後再試。')}>開啟教室投影</button>
+      {area === 'console' && <div className="activity-actions">
         <button className="secondary-button" ref={newActivityButton} aria-describedby={startRestriction ? 'start-activity-hint' : undefined} disabled={!canStartNew || starting} onClick={() => changeDialog.current?.showModal()}>開始新活動</button>
         {startRestriction && <p id="start-activity-hint" className="muted">{startRestriction}</p>}
-      </aside>}
+      </div>}
     </div>
     {area === 'console' && <div className="work-panel teacher-results-panel"><TeacherResults {...{ session, credential }} source={view?.worksheetPreview?.source} /></div>}
     <dialog ref={changeDialog} className="work-dialog" aria-labelledby="activity-title" onCancel={event => { event.preventDefault(); if (!starting) closeChange(); }}>
-      <h2 id="activity-title">開始新活動</h2><p>保留舊紀錄並沿用分組。請向學生發放新加入碼。</p>
+      <h2 id="activity-title">開始新活動</h2><p>保留舊紀錄，並沿用分組與完整出題清單及順序。請向學生發放新加入碼。</p>
       <div className="row-actions"><button autoFocus className="secondary-button" disabled={starting} onClick={closeChange}>取消</button>
         <button className="primary" disabled={starting} onClick={() => void startNew()}>確認開始</button></div>
     </dialog>

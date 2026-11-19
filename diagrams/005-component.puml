@@ -1,0 +1,37 @@
+@startuml
+!pragma layout smetana
+title 調整教室操作流程｜功能組件
+left to right direction
+skinparam defaultFontName PingFang TC
+actor "老師" as Teacher
+actor "學生" as Student
+rectangle "所選教室" {
+  component "教師工作區導覽" as TeacherNav
+  component "分組管理" as Groups
+  component "題目管理\n匯入、題目卡、新增對話框" as Questions
+  component "老師控制台\n開放、結束與定案" as Console
+  component "全班投影\n唯讀" as Projection
+  component "活動出題清單" as Queue
+  component "教室活動" as Activity
+  component "學生導覽" as StudentNav
+  component "作答" as Answer
+  component "歷史紀錄" as History
+  component "已公布逐題結果" as Published
+}
+Teacher --> TeacherNav
+TeacherNav --> Groups : 第一項
+TeacherNav --> Questions : 第二項
+TeacherNav --> Console : 第三項
+TeacherNav --> Projection : 右側連結
+Questions --> Queue : 編修、加入、拖曳、刪除
+Console --> Queue : 讀取下一題
+Console --> Activity : 開放與定案
+Console --> Published : 查閱教師歷史與正式題號
+Activity --> Projection : 提供公開回合與收件狀態
+Activity --> Published : 定案公布
+Student --> StudentNav
+StudentNav --> Answer
+StudentNav --> History
+Answer --> Activity : 提交本組答案
+History --> Published : 查閱本組已公布結果
+@enduml

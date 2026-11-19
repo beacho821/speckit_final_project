@@ -17,7 +17,7 @@ function setup() {
 describe('回合與整組收件', () => {
   it('題組只在完整答案時收件，按先後給一個共用順位', () => {
     const { activity, round } = setup(); startRound(activity, round.id, 100);
-    expect(() => submitAnswers(activity, round.id, 'a', [{ questionId: '1（1）', text: 'CPU' }], 101)).toThrow('1（2）');
+    expect(() => submitAnswers(activity, round.id, 'a', [{ questionId: '1（1）', text: 'CPU' }], 101)).toThrow('第 1 題，第 2 部分尚未填答');
     expect(round.submissions).toHaveLength(0);
     const first = submitAnswers(activity, round.id, 'a', [{ questionId: '1（1）', text: ' CPU ' }, { questionId: '1（2）', text: '中央處理器' }], 102);
     const second = submitAnswers(activity, round.id, 'b', [{ questionId: '1（1）', text: 'A' }, { questionId: '1（2）', text: 'B' }], 103);

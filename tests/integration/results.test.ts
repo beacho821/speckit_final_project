@@ -73,7 +73,7 @@ describe('結果與回填端點整合', () => {
       expect(rows.filter(row => row.startsWith('3,') && row.endsWith(',,,未送出,'))).toHaveLength(2);
       expect(rows).toContain('3,丙組,未列出的答案,1,已送出,答錯');
       expect(rows).toContain('3,,測試補答,,老師補答,');
-      expect(rows).toContain('M1,,測試補答,,老師補答,');
+      expect(rows).toContain('4,,測試補答,,老師補答,');
       expect(c.activity.rounds.filter(round => round.phase === 'ended')).toHaveLength(4);
     } finally { fillsRow = 2; await c.close(); }
   });

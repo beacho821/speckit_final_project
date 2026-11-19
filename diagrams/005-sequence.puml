@@ -1,0 +1,49 @@
+@startuml
+title 調整教室操作流程｜備題、投影、作答及歷史
+skinparam defaultFontName PingFang TC
+actor "老師" as Teacher
+participant "題目管理" as Questions
+participant "老師控制台" as Console
+participant "教室活動" as Activity
+participant "全班投影" as Projection
+participant "學生導覽" as StudentView
+actor "學生" as Student
+
+Teacher -> Questions : 新增手動題及匯入學習單
+alt 首次匯入
+  Questions -> Activity : 發布來源並保留手動題
+else 已有來源且確認重新匯入
+  Questions -> Activity : 驗證後替換全部卡片並清空清單
+end
+Teacher -> Questions : 加入、編修、拖曳或確認刪除題目卡
+Questions -> Activity : 儲存題目及出題順序\n刪除時一併移除舊準備回合
+alt 儲存成功
+  Activity --> Questions : 顯示已儲存的清單
+else 資料缺漏或版本已變更
+  Activity --> Questions : 說明原因並保留上次有效內容
+end
+
+Teacher -> Console : 切換至老師控制台
+Console -> Activity : 取得下一道可開放題目
+Teacher -> Projection : 選取教師導覽右側的投影連結
+Projection -> Activity : 讀取本教室的公開狀態
+Teacher -> Console : 開放搶答
+Console -> Activity : 驗證清單版本並以實際順序固定題號
+Activity --> Projection : 同步公開題目與階段
+Activity --> StudentView : 取得目前題目
+Student -> StudentView : 輸入答案後切至歷史
+StudentView -> Activity : 載入本活動已公布結果
+Activity --> StudentView : 顯示既有紀錄或空狀態
+Student -> StudentView : 回作答並送出本組答案
+StudentView -> Activity : 送出同回合答案
+Activity --> StudentView : 顯示已收件答案
+Activity --> Projection : 更新本教室各組收件狀態
+Teacher -> Console : 結束後審核並定案
+Console -> Activity : 公布逐題結果
+Teacher -> Console : 查閱教師歷史
+Console -> Activity : 載入本教室已定案的回合
+Activity --> Console : 保留正式題號及原作答
+Student -> StudentView : 查閱歷史紀錄
+StudentView -> Activity : 伺服器依已驗證組別取得公布結果
+Activity --> StudentView : 顯示題號、題幹、答案及判定
+@enduml

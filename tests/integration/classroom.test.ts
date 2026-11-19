@@ -81,12 +81,12 @@ it('雙教室同時收件並各自定案，原教室投影不會跟隨教師切�
       const round = await (await c.request('/rounds', teacher, { unitId: question.unitId }, 'POST')).json();
       await c.request('/questions/' + question.questionKey, teacher, { questionRevision: 0, acceptedAnswersText: '答案' }, 'PATCH');
       expect((await c.request('/rounds/' + round.id + '/start', teacher, undefined, 'POST')).status).toBe(200);
-      return { roomId, teacher, student, roundId: round.id };
+      return { roomId, teacher, student, roundId: round.id, questionId: question.questionId };
     }
     const a = await prepare(c.room.id, c.teacher);
     const b = await prepare(second.id, { ...c.teacher, 'X-Classroom-Id': second.id, 'X-Activity-Id': second.activityId });
     const screen = (entry: typeof a) => c.request('/classrooms/' + entry.roomId + '/projection', entry.teacher).then(response => response.json());
-    const send = (entry: typeof a) => c.request('/rounds/' + entry.roundId + '/submissions', entry.student, { answers: [{ questionId: '1', text: '答案' }] }, 'POST');
+    const send = (entry: typeof a) => c.request('/rounds/' + entry.roundId + '/submissions', entry.student, { answers: [{ questionId: entry.questionId, text: '答案' }] }, 'POST');
     expect((await screen(a)).phase).toBe('active');
     expect((await screen(b)).phase).toBe('active');
     expect((await send(a)).status).toBe(201);

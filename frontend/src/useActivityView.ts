@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActivityView, SessionResponse } from '../../shared/api';
 import { activityHeaders } from './api';
 
@@ -7,7 +7,13 @@ export function useActivityView(session: SessionResponse | null, credential: str
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [fullSnapshot, setFullSnapshot] = useState(0);
-  const refresh = useCallback(() => setRevision(value => value + 1), []);
+  const [completedRefresh, setCompletedRefresh] = useState(0);
+  const requestedRefresh = useRef(0);
+  const refresh = useCallback(() => {
+    const requested = ++requestedRefresh.current;
+    setRevision(requested);
+    return requested;
+  }, []);
 
   useEffect(() => {
     if (!session) { setView(null); setError(''); return; }
@@ -21,22 +27,31 @@ export function useActivityView(session: SessionResponse | null, credential: str
 
     async function poll() {
       while (alive) {
-        request = new AbortController();
+        const controller = new AbortController();
+        request = controller;
         try {
           const full = version === undefined;
           const response = await fetch(`/api/view${full ? '' : `?after=${version}`}`, {
-            headers: activityHeaders(session!, credential), signal: request.signal,
+            headers: activityHeaders(session!, credential), signal: controller.signal,
           });
           if (!alive) return;
+          if (controller.signal.aborted) continue;
           if (response.status === 204) continue;
           const body = await response.json();
           if (!alive) return;
-          if (response.status === 401 || (response.status === 409 && body.code === 'ACTIVITY_EXPIRED')) { onExpired(); return; }
-          if (!response.ok) throw new Error();
+          if (controller.signal.aborted) continue;
+          if (response.status === 401 || (response.status === 409 && body?.code === 'ACTIVITY_EXPIRED')) { onExpired(); return; }
+          if (!response.ok || !body || !Number.isSafeInteger(body.version)
+            || !['idle', 'preparing', 'active', 'reviewing', 'ended'].includes(body.phase)
+            || (body.roundId !== null && typeof body.roundId !== 'string')
+            || !Array.isArray(body.closedRoundIds)) throw new Error();
           setView(body as ActivityView); setError('');
           version = body.version;
           retryNow = false;
-          if (full) setFullSnapshot(value => value + 1);
+          if (full) {
+            setFullSnapshot(value => value + 1);
+            setCompletedRefresh(revision);
+          }
         } catch {
           if (!alive) return;
           version = undefined;
@@ -53,5 +68,5 @@ export function useActivityView(session: SessionResponse | null, credential: str
     void poll();
     return () => { alive = false; window.removeEventListener('online', online); request?.abort(); wake?.(); };
   }, [session, credential, onExpired, revision]);
-  return { view, error, refresh, fullSnapshot };
+  return { view, error, refresh, fullSnapshot, completedRefresh };
 }

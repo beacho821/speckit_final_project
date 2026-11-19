@@ -1,12 +1,15 @@
 import type { Activity } from './activity.js';
-import type { ActivityView, Round, RoundResultLine, WorksheetPreview } from '../../shared/api.js';
-import { currentRound, finalCorrectness, remainingWait, reviewFor } from './rounds.js';
+import type { ActivityView, Round, RoundResultLine, StudentRoundResultLine, WorksheetPreview } from '../../shared/api.js';
+import { currentRound, finalCorrectness, remainingWait, reviewFor, roundNumbering } from './rounds.js';
 import type { Identity } from './access.js';
+import { nextUnitId } from './question-queue.js';
 import { previewQuestion } from './questions.js';
 
 export function makeView(activity: Activity, identity: Identity, now = performance.now(), retainReceipt = false): ActivityView {
   const round = currentRound(activity) ?? (retainReceipt && identity.role === 'student' ? activity.rounds.at(-1) : undefined);
-  const unit = round && activity.units.find(item => item.id === round.unitId);
+  const unit = round && (round.questions
+    ? { id: round.unitId, name: round.unitName, questions: round.questions }
+    : activity.units.find(item => item.id === round.unitId));
   const key = identity.role === 'teacher' ? 'teacher' : `student:${identity.groupId}`;
   const hideQuestionDetails = identity.role === 'student' && round?.phase === 'preparing';
   const common: ActivityView = {
@@ -14,7 +17,9 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     unit: unit ? {
       id: unit.id, questionIds: unit.questions.map(q => q.questionId),
       ...(hideQuestionDetails ? {} : {
-        name: unit.name, fillBlankIds: [], questions: (round?.questions ?? unit.questions).map(previewQuestion),
+        name: unit.name, fillBlankIds: [], questions: unit.questions.map((question, index) => ({ ...previewQuestion(question),
+          ...(round?.sequenceNumber !== undefined ? roundNumbering(round, index) : {}),
+        })),
       }),
     } : null,
     closedRoundIds: activity.rounds.filter(item => item.phase === 'ended').map(item => item.id),
@@ -24,6 +29,13 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     if (activity.writebackInProgress) common.writebackInProgress = true;
     common.rosterVersion = activity.rosterVersion;
     common.worksheetPreview = previewFor(activity);
+    common.catalogRevision = activity.catalogRevision;
+    common.queueUnitIds = activity.queueUnitIds;
+    common.nextUnitId = nextUnitId(activity);
+    const opened = new Map(activity.rounds.filter(round => round.phase !== 'preparing').map(round => [round.unitId, round]));
+    common.questionCards = activity.units.map(unit => ({
+      ...unit, opened: opened.has(unit.id), questionNumber: opened.get(unit.id)?.sequenceNumber,
+    }));
     common.availableUnits = activity.units
       .filter(candidate => !activity.rounds.some(item => item.unitId === candidate.id && item.phase !== 'preparing'))
       .map(candidate => ({ unitId: candidate.id, questionIds: candidate.questions.map(q => q.questionId), questions: candidate.questions.map(previewQuestion) }));
@@ -53,7 +65,8 @@ export function resultsFor(round: Round): RoundResultLine[] | null {
   if (round.phase !== 'ended' || !round.questions) return null;
   const submissions = new Map(round.submissions.map(submission => [submission.groupId, submission]));
   const supplements = new Map(round.supplements?.map(entry => [entry.questionId, entry.text]));
-  return round.questions.map(({ questionId, prompt }) => ({
+  return round.questions.map(({ questionId, prompt }, index) => ({
+    ...roundNumbering(round, index),
     questionId,
     prompt,
     winnerGroupId: round.winnerGroupId ?? null,
@@ -70,14 +83,28 @@ export function resultsFor(round: Round): RoundResultLine[] | null {
   }));
 }
 
+export function studentResultsFor(round: Round, groupId: string): StudentRoundResultLine[] | null {
+  if (round.phase !== 'ended' || !round.questions) return null;
+  const answers = new Map(round.submissions.find(row => row.groupId === groupId)?.answers.map(answer => [answer.questionId, answer]));
+  const supplements = new Map(round.supplements?.map(entry => [entry.questionId, entry.text]));
+  return round.questions.map((question, index) => {
+    const own = answers.get(question.questionId);
+    const correct = own ? finalCorrectness(own) ?? null : null;
+    return { ...roundNumbering(round, index), prompt: question.prompt, ownAnswer: own?.text ?? null, correct,
+      publishedAnswer: correct ? null : supplements.get(question.questionId) ?? question.acceptedAnswers.find(answer => answer.trim()) ?? null };
+  });
+}
+
 export function previewFor(activity: Activity): WorksheetPreview | null {
   const worksheet = activity.worksheet;
   if (!worksheet) return null;
   const units = activity.units.filter(unit => unit.questions[0]?.origin === 'worksheet');
+  const included = new Set(units.map(unit => unit.id));
+  const fills = worksheet.fills.filter(fill => included.has(fill.unitId));
   return {
     source: worksheet.source,
-    mainQuestionCount: new Set(worksheet.fills.map(fill => fill.mainQuestionId)).size,
-    fillCount: worksheet.fills.length, unitCount: units.length,
+    mainQuestionCount: new Set(fills.map(fill => fill.mainQuestionId)).size,
+    fillCount: fills.length, unitCount: units.length,
     units: units.map(({ id, name, questions }) => ({ id, name, questionIds: questions.map(q => q.questionId), questions: questions.map(previewQuestion) })),
   };
 }

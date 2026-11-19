@@ -10,10 +10,10 @@ it('取消資格會重算補答和勝組，原始收件順位仍可查', async (
     const round = await (await c.request('/rounds', c.teacher, { unitId: added.unitId }, 'POST')).json();
     await c.startConfiguredRound(round.id);
     const path = '/rounds/' + round.id;
-    await c.request(path + '/submissions', member.headers, { answers: [{ questionId: '1', text: '答案' }] }, 'POST');
+    await c.request(path + '/submissions', member.headers, { answers: [{ questionId: added.questionId, text: '答案' }] }, 'POST');
     await c.request(path + '/end', c.teacher, undefined, 'POST');
     const edit = (rev: number, disqualified: boolean) => c.request(path + '/review', c.teacher, { reviewRevision: rev, eligibility: [{ groupId: group.id, disqualified }] }, 'PATCH');
-    expect(await (await edit(0, true)).json()).toMatchObject({ missingSupplementQuestionIds: ['1'] });
+    expect(await (await edit(0, true)).json()).toMatchObject({ missingSupplementQuestionIds: [added.questionId] });
     expect((await edit(0, false)).status).toBe(409);
     expect(await (await edit(1, false)).json()).toMatchObject({ missingSupplementQuestionIds: [] });
     await edit(2, true);

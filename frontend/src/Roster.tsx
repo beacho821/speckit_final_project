@@ -2,14 +2,13 @@ import { useState } from 'react';
 import type { RosterResponse, SessionResponse } from '../../shared/api';
 import { activityHeaders, requestMessage, requireOk } from './api';
 
-export default function Roster({ session, credential, roster, onSave, projection = false }: {
-  session: SessionResponse; credential: string; roster: RosterResponse; onSave: (next: RosterResponse) => void; projection?: boolean;
+export default function Roster({ session, credential, roster, onSave }: {
+  session: SessionResponse; credential: string; roster: RosterResponse; onSave: (next: RosterResponse) => void;
 }) {
   const [editing, setEditing] = useState<{ id: string; name: string }>();
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [projectionCodes, setProjectionCodes] = useState<Record<string, string>>({});
 
   async function change(method: string, id?: string) {
     setBusy(true); setError('');
@@ -23,19 +22,6 @@ export default function Roster({ session, credential, roster, onSave, projection
       if (!id) setName('');
       else setEditing(undefined);
     } catch (cause) { setError(requestMessage(cause, '連線中斷，請確認目前名單後再操作。')); }
-    finally { setBusy(false); }
-  }
-
-  async function getProjectionCode(groupId: string) {
-    setBusy(true); setError('');
-    try {
-      const response = await fetch('/api/groups/' + encodeURIComponent(groupId) + '/projection-code', {
-        method: 'POST', headers: activityHeaders(session, credential),
-      });
-      await requireOk(response);
-      const { code } = await response.json();
-      setProjectionCodes(previous => ({ ...previous, [groupId]: code }));
-    } catch (cause) { setError(requestMessage(cause, '投影加入碼未產生，請重試。')); }
     finally { setBusy(false); }
   }
 
@@ -53,12 +39,10 @@ export default function Roster({ session, credential, roster, onSave, projection
         <h3>{group.name}</h3>
         <p>學生加入碼：{group.joinCode ? <strong className="join-code">{group.joinCode}</strong> : '目前停用，請管理者確認發碼存檔。'}</p>
         <p className="muted">曾加入名稱：{group.members.map(member => member.name).join('、') || '尚無學生加入'}</p>
-        {projectionCodes[group.id] && <p role="status">投影加入碼：<strong className="join-code">{projectionCodes[group.id]}</strong> · <a href="/projection" target="_blank" rel="noopener">組別投影入口</a></p>}
       </div>
       <div className="row-actions">
         {!roster.locked && <><button className="secondary-button" disabled={busy} onClick={() => setEditing({ id: group.id, name: group.name })}>更名</button>
           <button className="remove-button" disabled={busy} onClick={() => void change('DELETE', group.id)}>刪除</button></>}
-        {projection && <button className="secondary-button" disabled={busy} onClick={() => void getProjectionCode(group.id)}>產生投影加入碼</button>}
       </div>
       {!roster.locked && editing?.id === group.id && <form className="form-stack group-edit" onSubmit={event => { event.preventDefault(); void change('PATCH', group.id); }}>
         <label htmlFor={'group-' + group.id}>更改「{group.name}」組名</label>

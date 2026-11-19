@@ -6,11 +6,12 @@ import type { Activity } from './activity.js';
 import { activityLocation, credential, requireTeacher, scopedAccess, teacherOnly, type ActivityAccess } from './access.js';
 import { Classrooms, expiredActivity } from './classrooms.js';
 import { DomainError, endRound, prepareRound, publishRound, startRound, submitAnswers, updateReview } from './rounds.js';
-import { makeView, previewFor, resultsFor } from './views.js';
+import { makeView, previewFor, resultsFor, studentResultsFor } from './views.js';
 import { projectionFor } from './projection.js';
 import { importGoogleWorksheet, type ImportResult } from './worksheet/google-source.js';
 import { buildResultsCsv } from './results-csv.js';
 import { writebackToGoogle } from './worksheet/writeback.js';
+import { addToQueue, deleteQuestionUnit, reorderQueue, requireCatalogRevision, requireNextUnit } from './question-queue.js';
 import { addManualQuestion, updateQuestion } from './questions.js';
 import { beginImport, publishImportedWorksheet } from './worksheet/import.js';
 import { importXlsxWorksheet, XLSX_LIMIT } from './worksheet/xlsx-source.js';
@@ -52,11 +53,20 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
     });
   }
 
+  function verifyImport(req: Request, activity: Activity) {
+    const revision = req.header('X-Catalog-Revision');
+    requireCatalogRevision(activity, revision && /^\d+$/.test(revision) ? Number(revision) : undefined);
+    if (activity.worksheet && req.header('X-Confirm-Worksheet-Replacement') !== 'true') {
+      throw new DomainError(409, 'REPLACEMENT_CONFIRMATION_REQUIRED', '請先確認重新匯入會清除既有題目和出題清單。');
+    }
+  }
+
   async function completeImport(req: Request, res: Response, result: ImportResult, generation: number) {
     const context = req.activityAccess!;
     const alive = () => !req.aborted && !res.destroyed;
     if ('candidates' in result) {
       await classrooms.exclusive(context.room, context.activity, () => {
+        verifyImport(req, context.activity);
         if (context.activity.importGeneration !== generation || context.activity.rosterLocked || !alive()) {
           throw new DomainError(409, 'IMPORT_SUPERSEDED', '匯入期間活動或來源已更新，請重新匯入。');
         }
@@ -65,6 +75,7 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
       return;
     }
     const preview = await routeActivity(req, context, draft => {
+      verifyImport(req, draft);
       publishImportedWorksheet(draft, result, generation, context.activity.id, alive);
       return previewFor(draft);
     });
@@ -80,7 +91,7 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
         throw new DomainError(415, 'UNSUPPORTED_MEDIA_TYPE', '請直接上傳未壓縮的 XLSX 檔案。');
       }
       const { room, activity } = req.activityAccess!;
-      req.importGeneration = await classrooms.exclusive(room, activity, () => beginImport(activity).generation);
+      req.importGeneration = await classrooms.exclusive(room, activity, () => { verifyImport(req, activity); return beginImport(activity).generation; });
       next();
     } catch (error) { domainError(res, error); }
   }, express.raw({ type: () => true, limit: XLSX_LIMIT, inflate: false }), handle(async (req, res) => {
@@ -178,7 +189,7 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
     const { room, activity } = req.activityAccess!;
     const sheetId = req.body?.sheetId;
     if (sheetId !== undefined && (!Number.isSafeInteger(sheetId) || sheetId < 0)) throw new DomainError(422, 'INVALID_GID', '請選擇有效的工作表。');
-    const { generation } = await classrooms.exclusive(room, activity, () => beginImport(activity));
+    const { generation } = await classrooms.exclusive(room, activity, () => { verifyImport(req, activity); return beginImport(activity); });
     try {
       const result = services.importWorksheet ? await services.importWorksheet(req.body?.url, sheetId) : await importGoogleWorksheet(config, req.body?.url, sheetId);
       await completeImport(req, res, result, generation);
@@ -187,10 +198,35 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
       throw new DomainError(500, 'IMPORT_FAILED', '匯入失敗，原有預覽仍保留。請重新檢查網址後再試。');
     }
   }));
-  app.post('/api/questions', ...teacherAuth, mutate((draft, req) => addManualQuestion(draft, req.body), 201));
-  app.patch('/api/questions/:questionKey', ...teacherAuth, mutate((draft, req) => updateQuestion(draft, String(req.params.questionKey), req.body)));
-  app.post('/api/rounds', ...teacherAuth, mutate((draft, req) => prepareRound(draft, req.body?.unitId), 201));
-  app.post('/api/rounds/:id/start', ...teacherAuth, mutate((draft, req) => startRound(draft, String(req.params.id), services.now?.())));
+  app.post('/api/questions', ...teacherAuth, mutate((draft, req) => {
+    requireCatalogRevision(draft, req.body?.catalogRevision);
+    return addManualQuestion(draft, req.body);
+  }, 201));
+  app.patch('/api/questions/:questionKey', ...teacherAuth, mutate((draft, req) => {
+    requireCatalogRevision(draft, req.body?.catalogRevision);
+    return updateQuestion(draft, String(req.params.questionKey), req.body);
+  }));
+  app.delete('/api/questions/units/:unitId', ...teacherAuth, mutate((draft, req) =>
+    deleteQuestionUnit(draft, String(req.params.unitId), req.body?.catalogRevision)));
+  app.post('/api/question-queue', ...teacherAuth, mutate((draft, req) => addToQueue(draft, req.body ?? {})));
+  app.put('/api/question-queue', ...teacherAuth, mutate((draft, req) => reorderQueue(draft, req.body ?? {})));
+  app.post('/api/rounds/open-next', ...teacherAuth, mutate((draft, req) => {
+    const unitId = req.body?.unitId;
+    requireNextUnit(draft, unitId, req.body?.catalogRevision);
+    const prepared = draft.rounds.find(round => round.phase === 'preparing' && round.unitId === unitId);
+    const round = prepared ?? prepareRound(draft, unitId);
+    return startRound(draft, round.id, services.now?.());
+  }, 201));
+  app.post('/api/rounds', ...teacherAuth, mutate((draft, req) => {
+    requireNextUnit(draft, req.body?.unitId, req.body?.catalogRevision);
+    return prepareRound(draft, req.body?.unitId);
+  }, 201));
+  app.post('/api/rounds/:id/start', ...teacherAuth, mutate((draft, req) => {
+    const round = draft.rounds.find(round => round.id === req.params.id);
+    if (!round) throw new DomainError(409, 'ROUND_EXPIRED', '回合已更新，請重新載入教師畫面。');
+    requireNextUnit(draft, round.unitId, req.body?.catalogRevision);
+    return startRound(draft, round.id, services.now?.());
+  }));
   app.post('/api/rounds/:id/end', ...teacherAuth, mutate((draft, req) => endRound(draft, String(req.params.id))));
   app.patch('/api/rounds/:id/review', ...teacherAuth, mutate((draft, req) => updateReview(draft, String(req.params.id), req.body)));
   app.post('/api/rounds/:id/publish', ...teacherAuth, mutate((draft, req) => publishRound(draft, String(req.params.id), req.body?.reviewRevision)));
@@ -203,27 +239,15 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
   app.get('/api/rounds/:id/results', scoped, handle((req, res) => {
     const round = req.activityAccess!.activity.rounds.find(item => item.id === req.params.id);
     if (!round) throw new DomainError(404, 'ROUND_NOT_FOUND', '找不到指定回合。');
-    if (round.phase !== 'ended') throw new DomainError(403, 'RESULTS_HIDDEN', '老師公布後才能查看全班結果。');
-    res.json(resultsFor(round));
+    if (round.phase !== 'ended') throw new DomainError(403, 'RESULTS_HIDDEN', '老師公布後才能查看結果。');
+    const identity = req.activityAccess!.identity;
+    res.json(identity.role === 'student' ? studentResultsFor(round, identity.groupId!) : resultsFor(round));
   }));
   app.get('/api/view', scoped, handle((req, res) => poll(req, res, () => {
     const { activity, identity } = access(req);
     return makeView(activity, identity, services.now?.(), true);
   })));
 
-  app.post('/api/groups/:id/projection-code', ...teacherAuth, handle(async (req, res) => {
-    const { room, activity } = req.activityAccess!;
-    const groupId = String(req.params.id);
-    res.json({ groupId, code: await classrooms.projectionCode(room, activity, groupId) });
-  }));
-  const groupProjection = (req: Request) => {
-    const { role, secret } = credential(req);
-    const match = role === 'projection' ? classrooms.lookup(secret.trim(), true) : undefined;
-    if (!match) throw new DomainError(401, 'PROJECTION_REVOKED', '投影加入碼已失效或不正確，請向老師重新取得。');
-    return projectionFor(match.room, match.groupId);
-  };
-  app.post('/api/projections/group/session', handle((req, res) => res.json(groupProjection(req))));
-  app.get('/api/projections/group/view', handle((req, res) => poll(req, res, () => groupProjection(req))));
   app.get('/api/classrooms/:classroomId/projection', ...teacherAuth, handle((req, res) => poll(req, res, () => {
     const { room } = access(req);
     if (room.id !== req.params.classroomId) throw expiredActivity();

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { questionLabel } from './question-label';
 import type { ActivityView, GradeEdit, QuestionPreview, ReviewView } from '../../shared/api';
 import type { TeacherAction } from './TeacherRound';
 
@@ -72,7 +73,7 @@ export default function RoundReview({ roundPath, questions, groups, review, disa
         const key = gradeKey(group.id, answer.questionId);
         const correct = draft?.grades.get(key)?.correct ?? answer.correct ?? false;
         return <label key={key}>
-          <strong>{group.name} · 第 {answer.questionId} 題</strong>
+          <strong>{group.name} · {questionLabel(questions.find(question => question.questionId === answer.questionId) ?? answer)}</strong>
           <span className="question-prompt">{answer.text}</span>
           <span>自動判分：{answer.autoCorrect ? '答對' : '答錯'}{stale ? ` · 目前已儲存：${answer.correct ? '答對' : '答錯'}` : ''}</span>
           <select value={String(correct)} onChange={event => {
@@ -85,7 +86,7 @@ export default function RoundReview({ roundPath, questions, groups, review, disa
         })}
       </section>)}
       {needingSupplement.map(question => <label key={question.questionId}>
-        老師補答 · 第 {question.questionId} 題
+        老師補答 · {questionLabel(question)}
         <textarea rows={2} value={draft?.supplements.get(question.questionId) ?? savedSupplements.get(question.questionId) ?? ''} onChange={event => {
           const value = event.target.value;
           edit(current => ({ ...current, supplements: new Map(current.supplements).set(question.questionId, value) }));
@@ -93,7 +94,7 @@ export default function RoundReview({ roundPath, questions, groups, review, disa
         {stale && <span className="question-prompt">目前已儲存：{savedSupplements.get(question.questionId) ?? '尚未填寫'}</span>}
       </label>)}
       </div><aside className="review-actions form-stack">
-      {missing.length > 0 && <p role="status">公布前請補答：{missing.map(question => question.questionId).join('、')}</p>}
+      {missing.length > 0 && <p role="status">公布前請補答：{missing.map(questionLabel).join('、')}</p>}
       {stale && <p role="status">判分已有更新。請核對最新判分及補答後再儲存。</p>}
       {stale && <button className="quiet" onClick={() => edit(current => ({ ...current, revision: review.reviewRevision }))}>使用最新版本並保留輸入</button>}
       <button className="secondary-button" disabled={!draft || stale} onClick={() => void save()}>儲存判分與補答</button>
@@ -104,7 +105,7 @@ export default function RoundReview({ roundPath, questions, groups, review, disa
     {recoverySupplements.size > 0 && <details open className="question-editor">
       <summary>已失效的補答草稿（可複製）</summary>
       {[...recoverySupplements].map(([questionId, text]) => <label key={questionId}>
-        原第 {questionId} 題補答<textarea rows={2} readOnly value={text} />
+        原{questionLabel(questions.find(question => question.questionId === questionId) ?? { questionId })}補答<textarea rows={2} readOnly value={text} />
       </label>)}
     </details>}
   </div>;

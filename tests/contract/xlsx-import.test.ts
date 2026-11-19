@@ -1,7 +1,8 @@
+import { worksheetHeaders } from '../helpers/classroom';
 import {afterEach,it,expect} from 'vitest';import {classroom} from '../helpers/classroom';import {variant,exactSize} from '../fixtures/xlsx-variants';
 let c:Awaited<ReturnType<typeof classroom>>;afterEach(async()=>{await c?.close();});
 const mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-async function upload(bytes:Buffer,headers:Record<string,string>={},query=''){return fetch(`${c.base}/api/worksheet/import/xlsx${query}`,{method:'POST',headers:{...c.teacher,'Content-Type':mime,'X-File-Name':encodeURIComponent('學習單.xlsx'),...headers},body:bytes});}
+async function upload(bytes:Buffer,headers:Record<string,string>={},query=''){return fetch(`${c.base}/api/worksheet/import/xlsx${query}`,{method:'POST',headers:{...c.teacher,...worksheetHeaders(c.activity),'Content-Type':mime,'X-File-Name':encodeURIComponent('學習單.xlsx'),...headers},body:bytes});}
 it('raw上傳、候選不發布、指定實際工作表再發布、錯誤保留舊來源',async()=>{c=await classroom();let r=await upload(await variant({sheets:2}));expect(r.status).toBe(200);const candidates=(await r.json()).candidates;expect(c.activity.worksheet).toBeNull();r=await upload(await variant({sheets:2}),{'Content-Type':'application/octet-stream'},`?sheetId=${candidates[1].sheetId}`);expect(r.status).toBe(200);const old=c.activity.worksheet;expect(old?.source).toMatchObject({kind:'xlsx',fileName:'學習單.xlsx',sheetId:2});r=await upload(Buffer.from('壞檔'));expect(r.status).toBe(422);expect(c.activity.worksheet).toBe(old);});
 it('先授權／鎖定／MIME才讀主體，原JSON限制不變、精確10MiB接受及加一拒絕',async()=>{c=await classroom();const bytes=exactSize(await variant(),10485760);expect((await upload(bytes)).status).toBe(200);expect((await upload(Buffer.concat([bytes,Buffer.of(0)]))).status).toBe(413);expect((await upload(bytes,{Authorization:'Basic dGVhY2hlcjp3cm9uZw=='})).status).toBe(401);for(const type of ['multipart/form-data','application/json','text/plain'])expect((await upload(Buffer.of(0),{'Content-Type':type})).status).toBe(415);expect((await upload(Buffer.of(0),{'Content-Encoding':'gzip'})).status).toBe(415);expect((await c.request('/sessions',c.teacher,{padding:'x'.repeat(110000)},'POST')).status).toBe(413);c.activity.rosterLocked=true;expect((await upload(bytes)).status).toBe(409);});
 
@@ -29,7 +30,7 @@ it.each(['single', 'mixed'] as const)('開題前檢查每題標準答案，補�
   expect((await save(questions.at(-1))).status).toBe(409);
   expect((await start()).status).toBe(200);
   const opened = await (await c.request('/view', student.headers)).json();
-  expect(opened.unit.questions).toEqual(unit.questions);
+  expect(opened.unit.questions).toEqual(unit.questions.map((item, index) => ({ ...item, questionNumber: 1, partNumber: kind === 'mixed' ? index + 1 : null })));
   expect(JSON.stringify(opened)).not.toContain('甲答案');
 });
 

@@ -56,8 +56,7 @@ it('只有舊備份時維持停用，恢復可確認的最後發碼世代後才�
     const recovered = await restore();
     expect(BigInt(recovered.epoch!)).toBe(BigInt(last.epoch!) + 1n);
     expect(recovered.issue(() => 'SAMEPART')).not.toBe(oldCode);
-    expect(recovered.lookup(oldCode, false)).toBeUndefined();
-    expect(recovered.lookup(oldCode, true)).toBeUndefined();
+    expect(recovered.lookup(oldCode)).toBeUndefined();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

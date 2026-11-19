@@ -2,7 +2,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import type { ArchivedRoster, ClassroomLocation, ClassroomSummary, HistoryRound } from '../../shared/api.js';
 import { createActivity, type Activity } from './activity.js';
 import type { ClassroomRecord, ClassroomStorage, LoadedStorage, StoredActivity } from './classroom-store.js';
-import { currentRound, DomainError, endRound } from './rounds.js';
+import { currentRound, DomainError, endRound, multipart } from './rounds.js';
 import { validateName } from './roster.js';
 
 export interface Classroom {
@@ -13,7 +13,6 @@ export interface Classroom {
   startedAt: number;
   activity: Activity;
   history: StoredActivity[];
-  projectionCodes: Map<string, string>;
 }
 
 const memoryStorage: ClassroomStorage = { async save() {}, async remove() {} };
@@ -23,7 +22,7 @@ export const expiredActivity = () => new DomainError(409, 'ACTIVITY_EXPIRED', '�
 function storedActivity(activity: Activity, startedAt: number): StoredActivity {
   return {
     id: activity.id, startedAt, groups: activity.groups, members: [...activity.members.values()],
-    worksheet: activity.worksheet, units: activity.units, rosterLocked: activity.rosterLocked,
+    worksheet: activity.worksheet, units: activity.units, queueUnitIds: activity.queueUnitIds, rosterLocked: activity.rosterLocked,
     rosterVersion: activity.rosterVersion,
     rounds: activity.rounds.map(round => {
       const { openedAt: _time, ...data } = round;
@@ -48,7 +47,7 @@ export class Classrooms {
   private unavailable = new Map<string, string>();
   private pending = new Map<string, Promise<unknown>>();
   private issued = new Set<string>();
-  private codeIndex = new Map<string, { room: Classroom; groupId: string; projection: boolean }>();
+  private codeIndex = new Map<string, { room: Classroom; groupId: string }>();
   private writebackTargets = new Set<string>();
 
   constructor(private storage: ClassroomStorage = memoryStorage, private teacherPassword = '', readonly epoch: string | null = '1') {}
@@ -58,11 +57,23 @@ export class Classrooms {
     for (const id of storage.unavailable) directory.unavailable.set(id, '無法讀取的教室（' + id + '）');
     for (const record of storage.records) {
       const current = record.activities.find(item => item.id === record.currentActivityId)!;
-      const activity = { ...createActivity(), ...current, members: new Map(current.members.map(member => [member.id, member])) };
+      for (const stored of record.activities) {
+        let sequence = 0;
+        for (const round of stored.rounds) {
+          if (round.phase === 'preparing') continue;
+          sequence++;
+          round.sequenceNumber ??= sequence;
+          round.isMultipart ??= multipart(round.questions ?? [], stored.worksheet);
+        }
+      }
+      const manual = current.units.filter(unit => unit.questions[0]?.origin === 'manual').map(unit => unit.id);
+      const usedWorksheets = new Set(current.rounds.map(round => round.unitId).filter(id =>
+        current.units.some(unit => unit.id === id && unit.questions[0]?.origin === 'worksheet')));
+      const queueUnitIds = current.queueUnitIds ?? [...usedWorksheets, ...manual];
+      const activity = { ...createActivity(), ...current, queueUnitIds, members: new Map(current.members.map(member => [member.id, member])) };
       const room = {
         id: record.id, name: record.name, createdAt: record.createdAt, updatedAt: record.updatedAt,
         startedAt: current.startedAt, activity, history: record.activities.filter(item => item.id !== current.id),
-        projectionCodes: new Map<string, string>(),
       };
       try {
         const round = currentRound(activity);
@@ -94,11 +105,10 @@ export class Classrooms {
     if (this.epoch !== null) for (const group of activity.groups) activity.joinCodes.set(group.id, this.issue());
   }
 
-  lookup(code: string, projection = false) {
+  lookup(code: string) {
     if (this.epoch === null) throw new DomainError(503, 'CODE_UNAVAILABLE', '加入碼暫停使用，請管理者確認發碼世代存檔。');
     if (!code.startsWith(this.epoch + '-')) return undefined;
-    const match = this.codeIndex.get(code);
-    return match?.projection === projection ? match : undefined;
+    return this.codeIndex.get(code);
   }
 
   private updateStudentCodes(room: Classroom, previous: Map<string, string>) {
@@ -106,23 +116,12 @@ export class Classrooms {
       if (room.activity.joinCodes.get(id) !== code) this.codeIndex.delete(code);
     }
     for (const [groupId, code] of room.activity.joinCodes) {
-      if (previous.get(groupId) !== code) this.codeIndex.set(code, { room, groupId, projection: false });
+      if (previous.get(groupId) !== code) this.codeIndex.set(code, { room, groupId });
     }
   }
 
   private revokeCodes(room: Classroom) {
     for (const code of room.activity.joinCodes.values()) this.codeIndex.delete(code);
-    for (const code of room.projectionCodes.values()) this.codeIndex.delete(code);
-  }
-
-  projectionCode(room: Classroom, activity: Activity, groupId: string) {
-    return this.exclusive(room, activity, () => {
-      if (!activity.groups.some(group => group.id === groupId)) throw new DomainError(404, 'GROUP_NOT_FOUND', '找不到組別，請重新整理名單。');
-      const code = room.projectionCodes.get(groupId) ?? this.issue();
-      room.projectionCodes.set(groupId, code);
-      this.codeIndex.set(code, { room, groupId, projection: true });
-      return code;
-    });
   }
 
   summary(room: Classroom): ClassroomSummary {
@@ -153,7 +152,7 @@ export class Classrooms {
   async create(input: unknown) {
     const name = validateName(input, '教室名稱');
     const now = Date.now();
-    const room: Classroom = { id: randomUUID(), name, createdAt: now, updatedAt: now, startedAt: now, activity: createActivity(), history: [], projectionCodes: new Map() };
+    const room: Classroom = { id: randomUUID(), name, createdAt: now, updatedAt: now, startedAt: now, activity: createActivity(), history: [] };
     await this.save(snapshot(room));
     this.rooms.set(room.id, room);
     return room;
@@ -183,12 +182,6 @@ export class Classrooms {
       Object.assign(activity, draft);
       room.updatedAt = updatedAt;
       this.updateStudentCodes(room, previousCodes);
-      for (const [groupId, code] of room.projectionCodes) {
-        if (!draft.groups.some(group => group.id === groupId)) {
-          room.projectionCodes.delete(groupId);
-          this.codeIndex.delete(code);
-        }
-      }
       return result;
     });
   }
@@ -201,12 +194,13 @@ export class Classrooms {
       const now = Date.now();
       const activity = Object.assign(createActivity(), {
         groups: structuredClone(previous.groups), worksheet: previous.worksheet, units: structuredClone(previous.units),
+        queueUnitIds: [...previous.queueUnitIds],
       });
       this.issueForGroups(activity);
       const archived = structuredClone(storedActivity(previous, room.startedAt));
       archived.archivedAt = now;
       archived.rounds = archived.rounds.filter(item => item.phase === 'ended');
-      const replacement = { ...room, activity, startedAt: now, updatedAt: Math.max(now, room.updatedAt + 1), history: [...room.history, archived], projectionCodes: new Map<string, string>() };
+      const replacement = { ...room, activity, startedAt: now, updatedAt: Math.max(now, room.updatedAt + 1), history: [...room.history, archived] };
       await this.save(snapshot(replacement));
       this.revokeCodes(room);
       Object.assign(room, replacement);
@@ -240,6 +234,7 @@ export class Classrooms {
     return [...room.history, storedActivity(room.activity, room.startedAt)].reverse().flatMap(activity =>
       activity.rounds.filter(round => round.phase === 'ended').reverse().map(round => ({
         activityId: activity.id, startedAt: activity.startedAt, roundId: round.id,
+        questionNumber: round.sequenceNumber,
         title: round.unitName ?? round.questions?.map(question => question.questionId).join('、') ?? '已定案回合',
         winnerGroupName: round.roster.find(group => group.id === round.winnerGroupId)?.name,
       })));

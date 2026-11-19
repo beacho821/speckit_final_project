@@ -5,6 +5,11 @@ import type { Classrooms } from '../../backend/src/classrooms.js';
 import { createApp, type AppServices } from '../../backend/src/app.js';
 
 export const basic = (role: string, value: string) => `Basic ${Buffer.from(`${role}:${value}`).toString('base64')}`;
+export function worksheetHeaders(activity: { catalogRevision: number; worksheet: unknown }) {
+  return { 'X-Catalog-Revision': String(activity.catalogRevision),
+    ...(activity.worksheet ? { 'X-Confirm-Worksheet-Replacement': 'true' } : {}) };
+}
+
 export async function classroom(services: AppServices = {}, directory?: Classrooms, teacherPassword = randomUUID()) {
   const config = { teacherPassword, port: 0 };
   const { app, classrooms } = createApp(config, services, directory);
@@ -15,8 +20,33 @@ export async function classroom(services: AppServices = {}, directory?: Classroo
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const scope = { 'X-Classroom-Id': room.id, 'X-Activity-Id': activity.id, 'X-Activity-Epoch': classrooms.runtime };
   const teacher = { ...scope, Authorization: basic('teacher', config.teacherPassword) };
-  async function request(path: string, headers = teacher, body?: unknown, method = 'GET') {
+  async function rawRequest(path: string, headers: Record<string, string> = teacher, body?: unknown, method = 'GET') {
     return fetch(base + '/api' + path, { method, headers: { ...headers, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  }
+  async function request(path: string, headers: Record<string, string> = teacher, body?: unknown, method = 'GET') {
+    // 共用測試夾具取得目前版本。契約邊界測試可使用 rawRequest 原樣送出。
+    const scopedRoom = headers['X-Classroom-Id'];
+    if (headers.Authorization !== teacher.Authorization || !scopedRoom) return rawRequest(path, headers, body, method);
+    const target = classrooms.list().some(room => room.id === scopedRoom && !room.unavailable)
+      ? classrooms.get(scopedRoom).activity : undefined;
+    if (!target) return rawRequest(path, headers, body, method);
+    if (method === 'POST' && path === '/worksheet/import') {
+      return rawRequest(path, { ...worksheetHeaders(target), ...headers }, body, method);
+    }
+    const edit = body as Record<string, unknown> | undefined;
+    if (edit?.catalogRevision !== undefined) return rawRequest(path, headers, body, method);
+    if (method === 'POST' && path === '/rounds') {
+      const unit = target.units.find(unit => unit.id === edit?.unitId && unit.questions[0]?.origin === 'worksheet');
+      if (unit && !target.queueUnitIds.includes(unit.id)) {
+        const added = await rawRequest('/question-queue', headers, { unitId: unit.id, catalogRevision: target.catalogRevision }, 'POST');
+        if (!added.ok) return added;
+      }
+    }
+    if ((method === 'POST' && (path === '/rounds' || path === '/questions' || /^\/rounds\/[^/]+\/start$/.test(path)))
+      || (method === 'PATCH' && path.startsWith('/questions/'))) {
+      body = { ...(path === '/questions' ? { acceptedAnswersText: '答案' } : {}), ...edit, catalogRevision: target.catalogRevision };
+    }
+    return rawRequest(path, headers, body, method);
   }
   async function group(name = '甲組') {
     const response = await request('/groups', teacher, { name }, 'POST');
@@ -66,5 +96,5 @@ export async function classroom(services: AppServices = {}, directory?: Classroo
     if (!stopped.ok) throw new Error(`測試停止收件失敗：${stopped.status}`);
     return publishReviewedRound(roundId);
   }
-  return { app, classrooms, room, activity, config, base, scope, teacher, request, group, student, configureRound, startConfiguredRound, publishReviewedRound, finishRound, close: async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); } };
+  return { app, classrooms, room, activity, config, base, scope, teacher, request, rawRequest, group, student, configureRound, startConfiguredRound, publishReviewedRound, finishRound, close: async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); } };
 }

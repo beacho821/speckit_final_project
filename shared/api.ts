@@ -28,7 +28,7 @@ export interface FillBlank {
 export interface BuzzerUnit { id: string; name: string; questionIds: string[]; fillBlankIds: string[] }
 export type WorksheetSource = { kind: 'google'; documentId: string; sheetId: number; sheetTitle: string; importedAt: number } | { kind: 'xlsx'; fileName: string; sheetId: number; sheetTitle: string; importedAt: number };
 export interface Worksheet { source: WorksheetSource; fills: FillBlank[]; units: BuzzerUnit[] }
-export interface QuestionPreview { questionId: string; prompt: string | null; missingPrompt: boolean }
+export interface QuestionPreview { questionId: string; prompt: string | null; missingPrompt: boolean; questionNumber?: number; partNumber?: number | null }
 export interface RoundQuestion extends QuestionPreview {
   questionKey: string;
   unitId: string;
@@ -55,6 +55,8 @@ export interface Round {
   unitName?: string;
   phase: Phase;
   openedAt?: number;
+  sequenceNumber?: number;
+  isMultipart?: boolean;
   openAtByGroup: Record<string, number>;
   roster: GroupSummary[];
   submissions: Submission[];
@@ -69,6 +71,10 @@ export interface ActivityView {
   roundId: string | null;
   unit: (Pick<BuzzerUnit, 'id' | 'questionIds'> & Partial<Pick<BuzzerUnit, 'name' | 'fillBlankIds'>> & { questions?: QuestionPreview[] }) | null;
   closedRoundIds: string[];
+  questionCards?: Array<CatalogUnit & { opened: boolean; questionNumber?: number }>;
+  queueUnitIds?: string[];
+  catalogRevision?: number;
+  nextUnitId?: string | null;
   availableUnits?: Array<{ unitId: string; questionIds: string[]; questions?: QuestionPreview[] }>;
   editableQuestions?: RoundQuestion[];
   review?: ReviewView;
@@ -82,7 +88,18 @@ export interface ActivityView {
   waitRemainingMs?: number;
   version: number;
 }
+export interface StudentRoundResultLine {
+  questionNumber: number;
+  partNumber: number | null;
+  prompt: string | null;
+  ownAnswer: string | null;
+  correct: boolean | null;
+  publishedAnswer: string | null;
+}
+
 export interface RoundResultLine {
+  questionNumber?: number;
+  partNumber?: number | null;
   questionId: string;
   prompt: string | null;
   winnerGroupId: string | null;
@@ -112,10 +129,9 @@ export interface ArchivedRoster {
   archivedAt: number;
   groups: Array<GroupSummary & { members: Array<{ id: string; name: string }> }>;
 }
-export interface HistoryRound { activityId: string; startedAt: number; roundId: string; title: string; winnerGroupName?: string }
+export interface HistoryRound { activityId: string; startedAt: number; roundId: string; title: string; questionNumber?: number; winnerGroupName?: string }
 export interface ProjectionView {
   classroomName: string;
-  groupName?: string;
   phase: ActivityView['phase'];
   title?: string;
   questions: QuestionPreview[];

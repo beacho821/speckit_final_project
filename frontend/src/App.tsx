@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { SessionResponse } from '../../shared/api';
 import StudentRound from './StudentRound';
+import { StudentHistory } from './RoundHistory';
 import TeacherPortal from './TeacherWorkspace';
 import { ProjectionEntry, useOpenProjection } from './Projection';
 import { ApiRequestError, basicHeader, readError, requestMessage } from './api';
@@ -24,6 +25,7 @@ function ClassroomApp() {
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [path, setPath] = useState(window.location.pathname);
+  const studentPageHeading = useRef<HTMLHeadingElement>(null);
   const operation = useRef(0);
   const loginRequest = useRef<AbortController | null>(null);
   const navigate = useCallback((next: string) => {
@@ -35,6 +37,10 @@ function ClassroomApp() {
     window.addEventListener('popstate', back);
     return () => window.removeEventListener('popstate', back);
   }, []);
+
+  useEffect(() => {
+    if (path === '/student' || path === '/student/history') studentPageHeading.current?.focus();
+  }, [path]);
 
   const logout = useCallback(() => {
     operation.current++;
@@ -75,7 +81,7 @@ function ClassroomApp() {
       const body = await response.json();
       if (id !== operation.current) return;
       setRole(selected); setCredential(secret); setSession(body); setRestoring(false);
-      navigate(selected === 'teacher' ? '/teacher/classrooms' : '/student');
+      navigate(selected === 'teacher' ? '/teacher/classrooms' : prior && window.location.pathname === '/student/history' ? '/student/history' : '/student');
       if (selected === 'student' && !saveStudent(body, secret)) {
         setNotice('此分頁無法暫存身分，重新整理後請再輸入加入碼與名稱。');
       }
@@ -124,12 +130,26 @@ function ClassroomApp() {
   </main>;
 
   if (session.role === 'teacher') return <TeacherPortal {...{ credential, path, navigate, logout, openProjection }} />;
+  const historyPage = path === '/student/history';
   return <main className="student-shell">
     <header className="student-bar">
       <div><h1>{session.classroomName ?? '學生工作台'}</h1><p>{view?.groupName ?? session.groupName} · {session.studentName}</p></div>
       <button className="quiet" onClick={logout}>登出</button>
     </header>
+    <nav className="classroom-nav student-nav" aria-label="學生工作區">
+      <a href="/student" aria-current={!historyPage ? 'page' : undefined} onClick={event => {
+        event.preventDefault(); navigate('/student');
+      }}>作答</a>
+      <a href="/student/history" aria-current={historyPage ? 'page' : undefined} onClick={event => {
+        event.preventDefault(); navigate('/student/history');
+      }}>歷史紀錄</a>
+    </nav>
+    <h2 className="sr-only" tabIndex={-1} ref={studentPageHeading}>{historyPage ? '歷史紀錄' : '作答'}</h2>
     {notice && <p role="status">{notice}</p>}{error && <p className="error" role="alert">{error}</p>}
-    <StudentRound {...{ session, credential, view, syncError, refresh, fullSnapshot }} onExpired={logout} />
+    <div hidden={historyPage} key={session.activityId}>
+      <StudentRound {...{ session, credential, view, syncError, refresh, fullSnapshot }} onExpired={logout} />
+    </div>
+    {historyPage && (view ? <StudentHistory {...{ session, credential }} roundIds={view.closedRoundIds}
+      snapshot={fullSnapshot} onExpired={logout} /> : <p role="status">{syncError || '正在取得歷史紀錄…'}</p>)}
   </main>;
 }
