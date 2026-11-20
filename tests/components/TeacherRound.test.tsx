@@ -62,14 +62,14 @@ it('上移和下移提交完整的待開放學習單順序', async () => {
 it('刪除確認不會用新版的版本刪除同識別的新題', async () => {
   const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
   await show(view);
-  await click('刪除');
+  await click('刪除題目');
   const updated = { ...view, catalogRevision: 2, questionCards: view.questionCards!.map(card =>
     ({ ...card, questions: card.questions.map(item => ({ ...item, questionKey: item.questionKey + '-新' })) })) };
   await show(updated);
   expect(host.querySelector<HTMLDialogElement>('dialog[aria-labelledby=delete-question-title]')?.open).toBe(false);
   expect(host.textContent).toContain('題目清單已更新');
   expect(fetch).not.toHaveBeenCalled();
-  await click('刪除');
+  await click('刪除題目');
   await click('確認刪除');
   expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ catalogRevision: 2 });
 });
@@ -91,4 +91,57 @@ it('拖曳期間收到新版清單時取消拖曳，不會提交舊順序', asyn
   const row = host.querySelector('[data-queue-id="u"]')!;
   await act(async () => { row.querySelector<HTMLButtonElement>('[data-move=up]')!.click(); });
   expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ worksheetUnitIds: ['u', 'v'], catalogRevision: 2 });
+});
+
+it.each([true, false])('題卡回應遺失，依本次完整同步核對是否已存（相符：%s）', async matches => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError());
+  const refresh = vi.fn(() => 2);
+  const show = (current: ActivityView, completedRefresh: number) =>
+    render(<TeacherRound session={session} credential="測試" view={current} {...{ refresh, completedRefresh }} />);
+  await show(view, 1);
+  await click('編修題目');
+  const field = host.querySelector<HTMLTextAreaElement>('fieldset.question-editor textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, '送出的題幹');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await click('儲存修改');
+  expect(host.textContent).toContain('待確認');
+  const questions = [{ ...question, prompt: matches ? '送出的題幹' : '其他內容', questionRevision: 2 }];
+  await show({ ...view, catalogRevision: 2, questionCards: [{ ...view.questionCards![0], questions }, view.questionCards![1]] }, 2);
+  expect(Boolean(host.querySelector('fieldset.question-editor textarea'))).toBe(!matches);
+  expect(host.textContent).toContain(matches ? '送出的題幹' : '請核對');
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it('拖曳預覽與放開共用落點，取消不提交排序', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
+  await show(view);
+  const handle = host.querySelector<HTMLElement>('[data-queue-id="u"] .drag-handle')!;
+  const row = host.querySelector<HTMLElement>('[data-queue-id="v"]')!;
+  handle.setPointerCapture = vi.fn();
+  handle.releasePointerCapture = vi.fn();
+  handle.hasPointerCapture = () => true;
+  vi.spyOn(row, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 30, 50, 50));
+  const hit = vi.fn(() => row);
+  const previous = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  Object.defineProperty(document, 'elementFromPoint', { value: hit, configurable: true });
+  const dispatch = (type: string) => act(async () => {
+    handle.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientY: 70 }), { pointerId: 1, isPrimary: true }));
+  });
+  try {
+    await dispatch('pointerdown');
+    await dispatch('pointermove');
+    expect(row.classList.contains('queue-insert-after')).toBe(true);
+    expect(host.querySelector('.queue-preview')?.textContent).toContain(question.prompt);
+    await dispatch('pointercancel');
+    expect(host.querySelector('.queue-preview')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    await dispatch('pointerdown');
+    await dispatch('pointerup');
+    expect(JSON.parse(String(fetch.mock.lastCall?.[1]?.body))).toEqual({ worksheetUnitIds: ['v', 'u'], catalogRevision: 1 });
+  } finally {
+    if (previous) Object.defineProperty(document, 'elementFromPoint', previous);
+    else Reflect.deleteProperty(document, 'elementFromPoint');
+  }
 });

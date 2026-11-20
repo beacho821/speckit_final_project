@@ -112,3 +112,39 @@ it('不可見的手動題幹與改題請求不會變更題庫', async () => {
     expect(c.activity.units[0].questions[0]).toMatchObject({prompt,questionRevision:0});
   } finally { await c.close(); }
 });
+
+it('整卡更新一次提交所有部分，拒絕無效部分且保留所有版本', async () => {
+  const c = await classroom({ importWorksheet: async () => ({ worksheet: structuredClone(worksheet) }) });
+  try {
+    const group = await c.group();
+    const student = await c.student(group.joinCode);
+    expect((await c.request('/worksheet/import', c.teacher, { url: 'mock' }, 'POST')).status).toBe(200);
+    const unit = c.activity.units.find(unit => unit.questions.length > 1)!;
+    const initial = structuredClone(unit);
+    const catalogRevision = c.activity.catalogRevision;
+    const questions = unit.questions.map((question, index) => ({
+      questionKey: question.questionKey, questionRevision: question.questionRevision,
+      prompt: `完整的新題幹 ${index + 1}`, acceptedAnswersText: '  測試答案  \n\n',
+    }));
+    const patch = (parts: unknown, headers = c.teacher) => c.request(
+      '/questions/units/' + unit.id, headers, { catalogRevision, questions: parts }, 'PATCH',
+    );
+    expect((await patch(questions, student.headers)).status).toBe(403);
+    for (const parts of [questions.slice(1), [questions[0], questions[0]],
+      questions.map((part, i) => i === 1 ? { ...part, acceptedAnswersText: ' ' } : part)]) {
+      expect((await patch(parts)).status).toBe(422);
+      expect(c.activity.units.find(item => item.id === unit.id)).toEqual(initial);
+      expect(c.activity.catalogRevision).toBe(catalogRevision);
+    }
+    const success = await patch(questions);
+    expect(success.status).toBe(200);
+    expect(await success.json()).toMatchObject({
+      catalogRevision: catalogRevision + 1,
+      unit: { id: unit.id, questions: questions.map(part => ({
+        questionKey: part.questionKey, questionRevision: part.questionRevision + 1,
+        prompt: part.prompt, acceptedAnswers: ['測試答案'],
+      })) },
+    });
+    expect((await patch(questions)).status).toBe(409);
+  } finally { await c.close(); }
+});

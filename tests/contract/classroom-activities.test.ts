@@ -44,3 +44,19 @@ it('新活動沿用備課與分組，保留歷史答案並撤銷舊碼', async (
     expect(oldLogin.status).toBe(401);
   } finally { await c.close(); }
 });
+
+it('並行以同一場活動開始新場只會成功一次', async () => {
+  const c = await classroom();
+  try {
+    const path = '/classrooms/' + c.room.id + '/activities';
+    const [first, second] = await Promise.all([
+      c.request(path, c.teacher, undefined, 'POST'),
+      c.request(path, c.teacher, undefined, 'POST'),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([201, 409]);
+    const rejected = first.status === 409 ? first : second;
+    expect(await rejected.json()).toMatchObject({ code: 'ACTIVITY_EXPIRED' });
+    const history = await c.request(path + '/history');
+    expect(await history.json()).toHaveLength(1);
+  } finally { await c.close(); }
+});

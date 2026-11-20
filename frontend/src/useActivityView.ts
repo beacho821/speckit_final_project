@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActivityView, SessionResponse } from '../../shared/api';
 import { activityHeaders } from './api';
 
-export function useActivityView(session: SessionResponse | null, credential: string, onExpired: () => void) {
+export function useActivityView(session: SessionResponse | null, credential: string, onExpired: (reason: 'authorization' | 'activity') => void) {
   const [view, setView] = useState<ActivityView | null>(null);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -40,7 +40,8 @@ export function useActivityView(session: SessionResponse | null, credential: str
           const body = await response.json();
           if (!alive) return;
           if (controller.signal.aborted) continue;
-          if (response.status === 401 || (response.status === 409 && body?.code === 'ACTIVITY_EXPIRED')) { onExpired(); return; }
+          if (response.status === 401 || response.status === 403) { onExpired('authorization'); return; }
+          if (response.status === 409 && body?.code === 'ACTIVITY_EXPIRED') { onExpired('activity'); return; }
           if (!response.ok || !body || !Number.isSafeInteger(body.version)
             || !['idle', 'preparing', 'active', 'reviewing', 'ended'].includes(body.phase)
             || (body.roundId !== null && typeof body.roundId !== 'string')

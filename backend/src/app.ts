@@ -12,7 +12,7 @@ import { importGoogleWorksheet, type ImportResult } from './worksheet/google-sou
 import { buildResultsCsv } from './results-csv.js';
 import { writebackToGoogle } from './worksheet/writeback.js';
 import { addToQueue, deleteQuestionUnit, reorderQueue, requireCatalogRevision, requireNextUnit } from './question-queue.js';
-import { addManualQuestion, updateQuestion } from './questions.js';
+import { addManualQuestion, updateQuestion, updateQuestionCard } from './questions.js';
 import { beginImport, publishImportedWorksheet } from './worksheet/import.js';
 import { importXlsxWorksheet, XLSX_LIMIT } from './worksheet/xlsx-source.js';
 import { addGroup, renameGroup, deleteGroup, joinMember, rosterFor, validateName } from './roster.js';
@@ -205,6 +205,11 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
   app.patch('/api/questions/:questionKey', ...teacherAuth, mutate((draft, req) => {
     requireCatalogRevision(draft, req.body?.catalogRevision);
     return updateQuestion(draft, String(req.params.questionKey), req.body);
+  }));
+  app.patch('/api/questions/units/:unitId', ...teacherAuth, mutate((draft, req) => {
+    requireCatalogRevision(draft, req.body?.catalogRevision);
+    const unit = updateQuestionCard(draft, String(req.params.unitId), req.body?.questions);
+    return { unit, catalogRevision: draft.catalogRevision };
   }));
   app.delete('/api/questions/units/:unitId', ...teacherAuth, mutate((draft, req) =>
     deleteQuestionUnit(draft, String(req.params.unitId), req.body?.catalogRevision)));

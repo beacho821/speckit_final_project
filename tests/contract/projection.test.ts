@@ -32,7 +32,16 @@ it('全班投影限教師並隔離教室，已停止的組別投影路徑均找�
     expect(received.groups.map((item: { received: boolean }) => item.received)).toEqual([true, false]);
     expect(JSON.stringify(received)).not.toMatch(/不顯示答案|不顯示名稱/);
     await c.finishRound(round.id);
-    await c.request('/classrooms/' + c.room.id + '/activities', c.teacher, undefined, 'POST');
+    const next = await c.request('/classrooms/' + c.room.id + '/activities', c.teacher, undefined, 'POST');
+    expect(next.status).toBe(201);
     expect((await c.request(full)).status).toBe(409);
+    const location = await (await c.request('/classrooms/' + c.room.id)).json();
+    const refreshed = await c.request(full, { ...c.teacher,
+      'X-Activity-Id': location.activityId, 'X-Activity-Epoch': location.activityEpoch,
+    });
+    expect(refreshed.status).toBe(200);
+    expect(await refreshed.json()).toMatchObject({ classroomName: c.room.name, phase: 'idle', questions: [],
+      groups: [{ name: '甲組', received: false }, { name: '乙組', received: false }] });
+    expect(JSON.stringify(received)).not.toContain(group.joinCode);
   } finally { await c.close(); }
 });

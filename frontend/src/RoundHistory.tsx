@@ -50,7 +50,14 @@ export function StudentHistory({ session, credential, roundIds, snapshot, onExpi
       <div key={round.id}>{round.rows.map((item, index) => <article className="student-history-item" key={index}>
         <h3>{questionLabel(item)}　{item.prompt}</h3>
         <p>已回答：{item.ownAnswer ?? '未作答'}</p>
-        <p className="published-answer">{item.correct ? '正確' : `正確答案：${item.publishedAnswer ?? '未提供'}`}</p>
+        <p className="published-answer">
+          {item.ownAnswer !== null && item.correct === true
+            ? <strong className="outcome-correct">正確</strong>
+            : <>
+              {item.ownAnswer !== null && item.correct === false && <><strong className="outcome-incorrect">錯誤</strong>{'　'}</>}
+              正確答案：{item.publishedAnswer ?? '未提供'}
+            </>}
+        </p>
       </article>)}</div>)}</div>
   </section>;
 }

@@ -13,7 +13,10 @@ it('同分頁切換控制台時，共用草稿會阻止開放，儲存後可以�
   const view: ActivityView = { phase: 'preparing', roundId: 'r', unit: { id: 'u', questionIds: ['1'] }, closedRoundIds: [], version: 1,
     questionCards: [{ id: 'u', name: '首題', questions: [question], opened: false }], queueUnitIds: ['u'], nextUnitId: 'u', catalogRevision: 1, groups: [{ id: 'g', name: '甲組', received: false }] };
   const session = { role: 'teacher' as const, activityId: 'a' };
-  const actions = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
+  const actions = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({
+    unit: { id: 'u', name: '首題', questions: [{ ...question, prompt: '新題', questionRevision: 2 }] },
+    catalogRevision: 2,
+  })).mockResolvedValueOnce(Response.json({}));
   const workspace = (mode: 'settings' | 'console') => <TeacherRound session={session} credential="測試" view={view} mode={mode} />;
   await render(workspace('settings'));
   await click('編修題目');
@@ -30,7 +33,7 @@ it('同分頁切換控制台時，共用草稿會阻止開放，儲存後可以�
   await click('儲存修改');
   await render(workspace('console'));
   await click('開放搶答');
-  expect(actions.mock.calls.map(([path]) => path)).toEqual(['/api/questions/q', '/api/rounds/open-next']);
+  expect(actions.mock.calls.map(([path]) => path)).toEqual(['/api/questions/units/u', '/api/rounds/open-next']);
 });
 
 it('切換教室後忽略原教室的遲到撤權', async () => {
@@ -63,7 +66,7 @@ it('題目寫入回應遺失後只接受本次重新同步，先前完整快照�
       fullSnapshot={fullSnapshot} completedRefresh={completedRefresh} />,
   );
   await show(1, 1);
-  await click('刪除');
+  await click('刪除題目');
   await click('確認刪除');
   await show(2, 1);
   await act(async () => lost(new TypeError('offline')));

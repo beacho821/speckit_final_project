@@ -135,3 +135,23 @@ it('歷史載入的網路與解析錯誤以正體中文顯示，可重試並保�
   expect(request).toHaveBeenCalledTimes(7);
   expect(onExpired).toHaveBeenCalledOnce();
 });
+
+it('學生歷史用文字區分已公布的正誤、未作答及缺少判定', async () => {
+  const { StudentHistory } = await import('../../frontend/src/RoundHistory');
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([
+    { questionNumber: 1, partNumber: 1, prompt: '第一部分', ownAnswer: '甲', correct: true, publishedAnswer: null },
+    { questionNumber: 1, partNumber: 2, prompt: '第二部分', ownAnswer: '乙', correct: false, publishedAnswer: '丙' },
+    { questionNumber: 2, partNumber: null, prompt: '未作答題', ownAnswer: null, correct: false, publishedAnswer: '丁' },
+    { questionNumber: 3, partNumber: null, prompt: '舊題', ownAnswer: '戊', correct: null, publishedAnswer: null },
+  ]));
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  await act(async () => root!.render(<StudentHistory session={session} credential="測試" roundIds={['r']} />));
+  const rows = host.querySelectorAll('article');
+  expect(rows[0].querySelector('.outcome-correct')?.textContent).toBe('正確');
+  expect(rows[1].querySelector('.outcome-incorrect')?.textContent).toBe('錯誤');
+  expect(rows[1].textContent).toContain('正確答案：丙');
+  expect(rows[2].textContent).toContain('未作答');
+  expect(rows[2].querySelector('.outcome-incorrect')).toBeNull();
+  expect(rows[3].textContent).toContain('正確答案：未提供');
+  expect(rows[3].querySelector('.outcome-correct, .outcome-incorrect')).toBeNull();
+});

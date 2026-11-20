@@ -148,3 +148,47 @@ it('刪除舊版準備題以單次存檔清除回合與題卡，失敗後可重�
     expect(await opened.json()).toMatchObject({ sequenceNumber: 1, phase: 'active' });
   } finally { await c?.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+it('整卡保存失敗不改任何部分，成功後可從存檔復原', async () => {
+  const { worksheet } = await import('../helpers/worksheet');
+  const directory = await mkdtemp(join(tmpdir(), 'classroom-save-card-'));
+  const password = randomUUID();
+  const storage = await openClassroomStorage(directory);
+  let rejectUpdate = false;
+  const initial = await Classrooms.restore({
+    ...storage,
+    async save(record) {
+      if (rejectUpdate) throw new Error('存檔失敗');
+      await storage.save(record);
+    },
+  }, password);
+  const c = await classroom({ importWorksheet: async () => ({ worksheet: structuredClone(worksheet) }) }, initial, password);
+  try {
+    expect((await c.request('/worksheet/import', c.teacher, { url: 'mock' }, 'POST')).status).toBe(200);
+    const unit = c.activity.units.find(unit => unit.questions.length > 1)!;
+    const catalogRevision = c.activity.catalogRevision;
+    const before = structuredClone(unit.questions);
+    const edit = {
+      catalogRevision,
+      questions: unit.questions.map((part, index) => ({
+        questionKey: part.questionKey, questionRevision: part.questionRevision,
+        prompt: `新題幹第 ${index + 1} 部分`, acceptedAnswersText: '新答案',
+      })),
+    };
+    const patch = (body = edit) => c.request('/questions/units/' + unit.id, c.teacher, body, 'PATCH');
+    rejectUpdate = true;
+    expect((await patch()).status).toBe(503);
+    expect(c.activity.units.find(candidate => candidate.id === unit.id)?.questions).toEqual(before);
+    expect(c.activity.catalogRevision).toBe(catalogRevision);
+    rejectUpdate = false;
+    const competing = { ...edit, questions: edit.questions.map(part => ({ ...part, prompt: '另一頁的' + part.prompt })) };
+    const results = await Promise.all([patch(edit), patch(competing)]);
+    expect(results.map(result => result.status).sort()).toEqual([200, 409]);
+    const written = results[0].status === 200 ? edit : competing;
+    const restored = await Classrooms.restore(await openClassroomStorage(directory), password);
+    expect(restored.get(c.room.id).activity.units.find(candidate => candidate.id === unit.id)?.questions)
+      .toMatchObject(written.questions.map(part => ({
+        questionKey: part.questionKey, prompt: part.prompt, acceptedAnswers: ['新答案'], questionRevision: part.questionRevision + 1,
+      })));
+  } finally { await c.close(); await rm(directory, { recursive: true, force: true }); }
+});

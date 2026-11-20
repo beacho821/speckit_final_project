@@ -38,6 +38,19 @@ export interface RoundQuestion extends QuestionPreview {
   questionRevision: number;
 }
 export interface CatalogUnit { id: string; name: string; questions: RoundQuestion[] }
+export interface QuestionPartEdit {
+  questionKey: string;
+  questionRevision: number;
+  prompt: string;
+  acceptedAnswersText: string;
+}
+export interface QuestionCardEdit { catalogRevision: number; questions: QuestionPartEdit[] }
+export interface QuestionCardSaved { unit: CatalogUnit; catalogRevision: number }
+
+export function normalizeAcceptedAnswers(text: string) {
+  return text.split(/\r\n|\r|\n/).map(answer => answer.trim()).filter(Boolean);
+}
+
 export interface Answer {
   questionId: string;
   fillBlankId?: string;
