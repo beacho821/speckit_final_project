@@ -344,6 +344,21 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 .settlement-summary { overflow-wrap: anywhere; }
 .settlement-summary > p { margin-block: 8px 16px; }
+.settlement-own {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 12px;
+  color: #302b82;
+  background: #efefff;
+}
+.settlement-own > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.settlement-own > div:first-child { flex-direction: column; align-items: start; gap: 4px; }
+.settlement-own strong { overflow-wrap: anywhere; font-size: 1.25rem; }
+.settlement-own > div:last-child strong { font-size: 2rem; font-variant-numeric: tabular-nums; }
+.settlement-list-heading { margin: 24px 0 8px; font-size: 1rem; font-weight: 700; }
 .settlement-summary ul { margin: 0; padding: 0; list-style: none; }
 .settlement-summary li {
   display: flex;

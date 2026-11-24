@@ -52,6 +52,12 @@ function ClassroomApp() {
   }, [navigate]);
   const openProjection = useOpenProjection(credential, session?.role === 'teacher');
   const { view, error: syncError, refresh, fullSnapshot } = useActivityView(session?.role === 'student' ? session : null, credential, logout);
+  const settlementSeen = useRef(false);
+  useEffect(() => {
+    const published = session?.role === 'student' && Boolean(view?.settlement);
+    if (published && !settlementSeen.current && window.location.pathname === '/student/history') navigate('/student');
+    settlementSeen.current = published;
+  }, [session, view?.settlement, navigate]);
 
   async function authenticate(selected: 'teacher' | 'student', secret: string, studentName: string, prior?: SavedStudent) {
     const id = ++operation.current;
@@ -139,7 +145,7 @@ function ClassroomApp() {
     <nav className="classroom-nav student-nav" aria-label="學生工作區">
       <a href="/student" aria-current={!historyPage ? 'page' : undefined} onClick={event => {
         event.preventDefault(); navigate('/student');
-      }}>作答</a>
+      }}>{view?.settlement ? '活動結算' : '作答'}</a>
       <a href="/student/history" aria-current={historyPage ? 'page' : undefined} onClick={event => {
         event.preventDefault(); navigate('/student/history');
       }}>歷史紀錄</a>
