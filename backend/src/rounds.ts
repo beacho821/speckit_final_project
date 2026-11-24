@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Activity } from './activity.js';
 import { catalogChanged, changed, projectionChanged } from './activity.js';
 import { FAIRNESS_DELAY_MS, openTimes } from './fairness.js';
-import type { Answer, GradeEdit, ReviewView, Round, RoundQuestion, Submission, TeacherSupplement, Worksheet } from '../../shared/api.js';
+import type { Answer, GradeEdit, ReviewView, Round, RoundQuestion, Submission, Worksheet } from '../../shared/api.js';
+import { selectReviewSupplements, supplementCandidates } from '../../shared/review-supplements.js';
 
 export class DomainError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly details?: unknown) { super(message); }
@@ -135,43 +136,49 @@ export function finalCorrectness(answer: Answer): boolean | undefined {
   return answer.overrideCorrect ?? answer.autoCorrect;
 }
 
-function unansweredQuestionIds(questions: Round['questions'], submissions: Submission[]): string[] {
-  const correctIds = new Set(submissions.filter(submission => !submission.disqualified).flatMap(submission => submission.answers
-    .filter(answer => finalCorrectness(answer) === true).map(answer => answer.questionId)));
-  return (questions ?? []).map(question => question.questionId).filter(id => !correctIds.has(id));
-}
-
 export function reviewFor(round: Round): ReviewView {
-  const supplements = round.supplements ?? [];
-  const answeredByTeacher = new Set(supplements.filter(entry => entry.text.trim()).map(entry => entry.questionId));
+  const questions = round.questions ?? [];
+  const candidates = supplementCandidates(questions, round.supplements ?? []);
+  const correctIds = new Set(round.submissions.filter(submission => !submission.disqualified).flatMap(submission => submission.answers
+    .filter(answer => finalCorrectness(answer) === true).map(answer => answer.questionId)));
+  const { selected, missingSupplementQuestionIds } = selectReviewSupplements(questions, correctIds, candidates);
   return {
     reviewRevision: round.reviewRevision ?? 0,
-    missingSupplementQuestionIds: unansweredQuestionIds(round.questions, round.submissions).filter(id => !answeredByTeacher.has(id)),
-    supplements,
+    supplementCandidates: candidates,
+    missingSupplementQuestionIds,
+    supplements: selected.map(({ questionId, text }) => ({ questionId, text })),
   };
+}
+
+function requireReviewRevision(round: Round, revision: unknown) {
+  if (!Number.isSafeInteger(revision)) {
+    throw new DomainError(422, 'INVALID_REVIEW_REVISION', '請重新載入判分內容後再操作。');
+  }
+  if (revision !== (round.reviewRevision ?? 0)) {
+    throw new DomainError(409, 'REVIEW_REVISION_CHANGED', '判分內容已更新，請核對最新版本後再操作。');
+  }
 }
 
 function requireCurrentReview(activity: Activity, round: Round | undefined, revision: unknown): asserts round is Round {
   if (!round || round !== currentRound(activity) || round.phase !== 'reviewing') {
     throw new DomainError(409, 'REVIEW_UNAVAILABLE', '這個回合目前無法更正或公布，請重新整理畫面。');
   }
-  if (!Number.isSafeInteger(revision)) {
-    throw new DomainError(422, 'INVALID_REVIEW_REVISION', '請重新載入判分內容後再操作。');
-  }
-  if (revision !== round.reviewRevision) {
-    throw new DomainError(409, 'REVIEW_REVISION_CHANGED', '判分內容已更新，請核對最新版本後再操作。');
-  }
+  requireReviewRevision(round, revision);
 }
 
 export function updateReview(activity: Activity, roundId: string, input: unknown): ReviewView {
   const round = activity.rounds.find(item => item.id === roundId);
   const { reviewRevision, grades = [], supplements = [], eligibility = [] } = (input ?? {}) as Record<string, unknown>;
   requireCurrentReview(activity, round, reviewRevision);
-  if (!Array.isArray(grades) || !Array.isArray(supplements) || !Array.isArray(eligibility) || (!grades.length && !supplements.length && !eligibility.length)) {
-    throw new DomainError(422, 'INVALID_REVIEW', '請選擇要更正的答案，或填寫要儲存的老師補答。');
+  if (!Array.isArray(supplements) || supplements.length) {
+    throw new DomainError(422, 'INVALID_SUPPLEMENT', '補答已自動處理，請重新載入審核畫面後儲存判分。');
+  }
+  if (!Array.isArray(grades) || !Array.isArray(eligibility) || (!grades.length && !eligibility.length)) {
+    throw new DomainError(422, 'INVALID_REVIEW', '請選擇要更正的判分或組別資格。');
   }
 
   const nextSubmissions = structuredClone(round.submissions);
+  let modified = false;
   const answers = new Map(nextSubmissions.map(submission => [submission.groupId, new Map(submission.answers.map(answer => [answer.questionId, answer]))]));
   const seenGrades = new Set<Answer>();
   for (const entry of grades as Array<Partial<GradeEdit> | null>) {
@@ -181,7 +188,10 @@ export function updateReview(activity: Activity, roundId: string, input: unknown
       throw new DomainError(422, 'INVALID_GRADE', '請確認改判項目的組別、題號與正誤，且每筆答案只更正一次。');
     }
     seenGrades.add(answer);
-    answer.overrideCorrect = entry.correct;
+    if (finalCorrectness(answer) !== entry.correct) {
+      answer.overrideCorrect = entry.correct;
+      modified = true;
+    }
   }
 
   const seenGroups = new Set<string>();
@@ -191,25 +201,14 @@ export function updateReview(activity: Activity, roundId: string, input: unknown
       throw new DomainError(422, 'INVALID_ELIGIBILITY', '請選擇已送出的組別，每組只可設定一次資格。');
     }
     seenGroups.add(submission.groupId);
-    submission.disqualified = entry.disqualified;
-  }
-  const needsSupplement = new Set(unansweredQuestionIds(round.questions, nextSubmissions));
-  const questionIds = new Set(round.questions?.map(question => question.questionId));
-  const nextSupplements = new Map(round.supplements?.filter(entry => needsSupplement.has(entry.questionId)).map(entry => [entry.questionId, entry.text]));
-  const seenSupplements = new Set<string>();
-  for (const entry of supplements as Array<Partial<TeacherSupplement> | null>) {
-    if (!entry || typeof entry.questionId !== 'string' || typeof entry.text !== 'string'
-      || !questionIds.has(entry.questionId) || seenSupplements.has(entry.questionId)) {
-      throw new DomainError(422, 'INVALID_SUPPLEMENT', '請確認補答的完整題號與內容，每個題號只能填一筆。');
+    if ((submission.disqualified ?? false) !== entry.disqualified) {
+      submission.disqualified = entry.disqualified;
+      modified = true;
     }
-    seenSupplements.add(entry.questionId);
-    if (!entry.text.trim()) nextSupplements.delete(entry.questionId);
-    else if (needsSupplement.has(entry.questionId)) nextSupplements.set(entry.questionId, entry.text);
-    else throw new DomainError(422, 'SUPPLEMENT_NOT_NEEDED', `第 ${entry.questionId} 題已有組別答對，請先清除該題補答。`);
   }
 
+  if (!modified) return reviewFor(round);
   round.submissions = nextSubmissions;
-  round.supplements = [...nextSupplements].map(([questionId, text]) => ({ questionId, text }));
   round.reviewRevision = (round.reviewRevision ?? 0) + 1;
   changed(activity, ['teacher']);
   return reviewFor(round);
@@ -217,13 +216,12 @@ export function updateReview(activity: Activity, roundId: string, input: unknown
 
 export function publishRound(activity: Activity, roundId: string, revision: unknown) {
   const round = activity.rounds.find(item => item.id === roundId);
-  if (round?.phase === 'ended') return { id: round.id, phase: round.phase, winnerGroupId: round.winnerGroupId ?? null };
-  requireCurrentReview(activity, round, revision);
-  const { missingSupplementQuestionIds } = reviewFor(round);
-  if (missingSupplementQuestionIds.length) {
-    throw new DomainError(422, 'SUPPLEMENT_REQUIRED', `請補答第 ${missingSupplementQuestionIds.join('、')} 題後再公布。`, { missingSupplementQuestionIds });
+  if (round?.phase === 'ended') {
+    requireReviewRevision(round, revision);
+    return { id: round.id, phase: round.phase, winnerGroupId: round.winnerGroupId ?? null };
   }
-
+  requireCurrentReview(activity, round, revision);
+  round.supplements = reviewFor(round).supplements;
   round.winnerGroupId = round.submissions.find(submission =>
     !submission.disqualified && submission.answers.length === round.questions?.length && submission.answers.every(answer => finalCorrectness(answer) === true),
   )?.groupId;

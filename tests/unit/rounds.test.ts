@@ -53,30 +53,62 @@ it('兩組分別答對不同子題時，兩題都無須補答，且整個題組�
 it('只有無組答對的子題需要補答，晚到的送答不會改變判分', () => {
   const { activity, round } = setup();
   startRound(activity, round.id, 0);
-  submitAnswers(activity, round.id, 'a', [{questionId:'1（1）',text:' CPU '},{questionId:'1（2）',text:'錯誤'}], 0);
+  submitAnswers(activity, round.id, 'a', [{ questionId: '1（1）', text: ' CPU ' }, { questionId: '1（2）', text: '錯誤' }], 0);
   endRound(activity, round.id);
-  expect(reviewFor(round).missingSupplementQuestionIds).toEqual(['1（2）']);
-  expect(() => submitAnswers(activity, round.id, 'b', [{questionId:'1（1）',text:'CPU'},{questionId:'1（2）',text:'乙'}], 1)).toThrow('已停止收件');
-  expect(() => publishRound(activity, round.id, 0)).toThrow('請補答第 1（2） 題');
-  expect(round.phase).toBe('reviewing');
-  updateReview(activity, round.id, { reviewRevision:0, supplements:[{questionId:'1（2）',text:'老師補答'}] });
-  expect(reviewFor(round).missingSupplementQuestionIds).toEqual([]);
-  publishRound(activity, round.id, 1);
-  expect(round.supplements).toEqual([{questionId:'1（2）',text:'老師補答'}]);
+  expect(reviewFor(round).supplements).toEqual([{ questionId: '1（2）', text: '中央處理器' }]);
+  expect(reviewFor(round).supplementCandidates).toHaveLength(2);
+  expect(() => submitAnswers(activity, round.id, 'b', [], 1)).toThrow('已停止收件');
+  expect(publishRound(activity, round.id, 0)).toMatchObject({ phase: 'ended', winnerGroupId: null });
+  expect(round.supplements).toEqual([{ questionId: '1（2）', text: '中央處理器' }]);
 });
 
-it('更正有組答對時移除先前補答，錯誤的混合修改不寫入', () => {
+it('無人送答且一題無可引用來源時仍可定案，保留第一個有效答案的原文', () => {
   const { activity, round } = setup();
   startRound(activity, round.id, 0);
-  submitAnswers(activity, round.id, 'a', [{questionId:'1（1）',text:'CPU'},{questionId:'1（2）',text:'新寫法'}], 0);
   endRound(activity, round.id);
-  updateReview(activity, round.id, {reviewRevision:0,supplements:[{questionId:'1（2）',text:'已儲存的補答'}]});
-  const grade = {groupId:'a',questionId:'1（2）',correct:true};
-  expect(() => updateReview(activity, round.id, {reviewRevision:1,grades:[grade],supplements:[{questionId:'1（2）',text:'不應保留'}]})).toThrow('已有組別答對');
-  expect(round.reviewRevision).toBe(1);
-  expect(round.submissions[0].answers[1].overrideCorrect).toBeUndefined();
-  expect(round.supplements).toEqual([{questionId:'1（2）',text:'已儲存的補答'}]);
-  updateReview(activity, round.id, {reviewRevision:1,grades:[grade]});
+  round.questions![0].acceptedAnswers = [' \t ', '  標準答案  ', '另一個答案'];
+  round.questions![1].acceptedAnswers = ['\n'];
+  expect(reviewFor(round)).toMatchObject({
+    supplements: [{ questionId: '1（1）', text: '  標準答案  ' }], missingSupplementQuestionIds: ['1（2）'],
+  });
+  publishRound(activity, round.id, 0);
+  expect(round.supplements).toEqual([{ questionId: '1（1）', text: '  標準答案  ' }]);
+});
+
+it('舊人工補答優先，改判或取消資格後依有效判分重算，定案只封存適用補答', () => {
+  const { activity, round } = setup();
+  startRound(activity, round.id, 0);
+  submitAnswers(activity, round.id, 'a', [{ questionId: '1（1）', text: 'CPU' }, { questionId: '1（2）', text: '合理答案' }], 0);
+  endRound(activity, round.id);
+  const legacy = { questionId: '1（2）', text: '  已存人工原文  ' };
+  round.supplements = [legacy];
+  const grade = { groupId: 'a', questionId: '1（2）', correct: true };
+  const old = structuredClone(round);
+  expect(() => updateReview(activity, round.id, { reviewRevision: 0, grades: [grade], supplements: [{ ...legacy, text: '不可覆蓋' }] })).toThrow();
+  expect(round).toEqual(old);
+  expect(updateReview(activity, round.id, { reviewRevision: 0, grades: [grade], supplements: [] }).supplements).toEqual([]);
+  expect(round.supplements).toEqual([legacy]);
+  expect(updateReview(activity, round.id, { reviewRevision: 1, eligibility: [{ groupId: 'a', disqualified: true }] }).supplements)
+    .toEqual([{ questionId: '1（1）', text: 'CPU' }, legacy]);
+  updateReview(activity, round.id, { reviewRevision: 2, eligibility: [{ groupId: 'a', disqualified: false }] });
+  expect(publishRound(activity, round.id, 3).winnerGroupId).toBe('a');
   expect(round.supplements).toEqual([]);
-  expect(publishRound(activity, round.id, 2).winnerGroupId).toBe('a');
+  expect(round.submissions[0].answers[1]).toMatchObject({ text: '合理答案', autoCorrect: false, overrideCorrect: true });
+});
+
+it('同一筆改回錯誤後恢復舊人工補答原文，只封存仍欠答的子題', () => {
+  const { activity, round } = setup();
+  startRound(activity, round.id, 0);
+  const first = { questionId: '1（1）', text: 'CPU' };
+  const second = { questionId: '1（2）', text: '同義原答' };
+  submitAnswers(activity, round.id, 'a', [first, second], 0);
+  endRound(activity, round.id);
+  const legacy = { questionId: second.questionId, text: '  舊人工補答\n原文  ' };
+  round.supplements = [{ questionId: first.questionId, text: '另一筆舊補答' }, legacy];
+  expect(reviewFor(round).supplements).toEqual([legacy]);
+  const grades = (correct: boolean) => [{ groupId: 'a', questionId: second.questionId, correct }];
+  expect(updateReview(activity, round.id, { reviewRevision: 0, grades: grades(true) }).supplements).toEqual([]);
+  expect(updateReview(activity, round.id, { reviewRevision: 1, grades: grades(false) }).supplements).toEqual([legacy]);
+  expect(publishRound(activity, round.id, 2).winnerGroupId).toBeNull();
+  expect(round.supplements).toEqual([legacy]);
 });

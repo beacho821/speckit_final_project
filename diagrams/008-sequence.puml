@@ -1,0 +1,45 @@
+@startuml
+title 自動補答與逐筆改判｜時序圖
+actor "老師" as Teacher
+actor "學生" as Student
+participant "課堂回合" as Round
+participant "審核與定案" as Review
+Teacher -> Round : 開題前設定標準答案並開題
+Student -> Round : 送出答案
+Teacher -> Round : 停止收件
+Round -> Review : 提供原答、順位、自動判分與補答候選
+Review -> Review : 逐題預覽，優先引用舊人工原文
+Review --> Teacher : 顯示原答、改判按鈕與補答預覽
+opt 老師更正某組某題的判定
+  Teacher -> Review : 選擇錯誤或正確
+  Review -> Review : 依草稿判分與資格重算補答
+  opt 同一分頁切換教室功能頁
+    Teacher -> Review : 返回相同回合的控制台
+    Review --> Teacher : 顯示同回合草稿、補答預覽及待核對的判分
+  end
+  Teacher -> Review : 儲存判分
+  alt 審核內容已更新或儲存遭拒
+    Review --> Teacher : 保存草稿並提示核對
+  else 儲存成功
+    Review --> Teacher : 顯示確認的判定
+  end
+end
+Teacher -> Review : 確認定案
+Review -> Round : 核對版本並依已儲存判分重算
+Round -> Round : 封存判分、適用補答及勝組
+Round --> Student : 公布可見結果
+alt 收到有效的定案回應
+  Round --> Review : 回傳該回合的勝組或無勝組
+else 已確認封存，結果尚待確認
+  Review -> Round : 讀取原回合的封存結果
+  note over Review : 各回合分別保留待讀回的結果
+  opt 結果查詢失敗
+    Review --> Teacher : 在原操作區顯示查詢失敗及重試
+    note over Review : 較晚的定案失敗回應保留目前的查詢狀態
+    Teacher -> Review : 重新取得定案結果
+    Review -> Round : 重試讀取原回合的封存結果
+  end
+  Round --> Review : 回傳原回合的勝組或無勝組
+end
+Review --> Teacher : 在對應回合的操作區顯示結果
+@enduml

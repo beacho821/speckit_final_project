@@ -145,3 +145,257 @@ it('拖曳預覽與放開共用落點，取消不提交排序', async () => {
     else Reflect.deleteProperty(document, 'elementFromPoint');
   }
 });
+
+const reviewSession = { ...session, classroomId: 'c', activityEpoch: 'e' };
+const reviewSnapshot: ActivityView = {
+  phase: 'reviewing', roundId: 'r', closedRoundIds: [], version: 11,
+  unit: { id: 'u', questionIds: ['q'], questions: [{ questionId: 'q', prompt: '測試題幹', missingPrompt: false }] },
+  groups: [{ id: 'g', name: '甲組', received: true, answers: [{ questionId: 'q', text: '原文', correct: true }] }],
+  review: { reviewRevision: 0, supplements: [], missingSupplementQuestionIds: [],
+    supplementCandidates: [{ questionId: 'q', text: '標準答案', source: 'configured' }] },
+};
+const closedSnapshot: ActivityView = { ...reviewSnapshot, phase: 'idle', roundId: null, unit: null, closedRoundIds: ['r'], review: undefined, version: 12 };
+
+function showReview(current: ActivityView, refresh: () => number, completedRefresh = 0,
+  mode: 'console' | 'settings' = 'console', scope = reviewSession) {
+  return render(<TeacherRound session={scope} credential="test" view={current} {...{ mode, refresh, completedRefresh }} />);
+}
+const operationArea = () => host.querySelector('.review-actions');
+
+it('定案進度就地顯示，結果與焦點跨越審核快照結束', async () => {
+  let finish!: (result: Response) => void;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(input => String(input).endsWith('/publish')
+    ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(Response.json([])));
+  const refresh = vi.fn(() => 1);
+  await showReview(reviewSnapshot, refresh);
+  const region = operationArea();
+  await click('確認定案');
+  expect(region?.textContent).toContain('定案中');
+  await click('確認定案');
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/publish'))).toHaveLength(1);
+  await act(async () => finish(Response.json({ id: 'r', phase: 'ended', winnerGroupId: 'g' })));
+  await showReview(closedSnapshot, refresh, 1);
+  expect(operationArea()).toBe(region);
+  expect(region?.textContent).toContain('勝組：甲組');
+  expect(document.activeElement?.textContent).toContain('已定案');
+  await showReview({ ...reviewSnapshot, roundId: 'next', closedRoundIds: ['r'] }, refresh, 1);
+  expect(operationArea()?.textContent).not.toContain('勝組：甲組');
+});
+
+it.each([true, false])('定案回應遺失後只核對同回合結果（已封存：%s）', async published => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(input => {
+    if (String(input).endsWith('/publish')) return Promise.reject(new TypeError());
+    if (input === '/api/rounds/r/results') return Promise.resolve(Response.json([{ winnerGroupId: null, groups: [] }]));
+    return Promise.resolve(Response.json([]));
+  });
+  const refresh = vi.fn(() => 1);
+  await showReview(reviewSnapshot, refresh);
+  await click('確認定案');
+  expect(operationArea()?.textContent).toContain('結果待確認');
+  await showReview(reviewSnapshot, refresh, 0);
+  await click('確認定案');
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/publish'))).toHaveLength(1);
+  await showReview(published ? closedSnapshot : reviewSnapshot, refresh, 1);
+  if (published) {
+    expect(operationArea()?.textContent).toContain('已定案。無勝組');
+    expect(fetch.mock.calls.some(([url]) => url === '/api/rounds/r/results')).toBe(true);
+  } else {
+    expect(operationArea()?.textContent).toContain('仍在待審核');
+    expect([...host.querySelectorAll('button')].find(b => b.textContent === '確認定案')?.disabled).toBe(false);
+  }
+});
+
+it('定案明確遭拒時就地說明，不顯示成功', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(input => Promise.resolve(String(input).endsWith('/publish')
+    ? Response.json({ code: 'REVIEW_REVISION_CHANGED', message: '判分內容已更新，請核對最新版本後再操作。' }, { status: 409 }) : Response.json([])));
+  await showReview(reviewSnapshot, vi.fn(() => 1));
+  await click('確認定案');
+  expect(operationArea()?.querySelector('[role=alert]')?.textContent).toBe('判分內容已更新，請核對最新版本後再操作。');
+  expect(operationArea()?.textContent).not.toContain('已定案');
+});
+
+it('儲存回應遺失時僅版本增加不算成功，保留未反映的草稿', async () => {
+  const refresh = vi.fn(() => 2);
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(input => String(input).endsWith('/review')
+    ? Promise.reject(new TypeError()) : Promise.resolve(Response.json([])));
+  await showReview(reviewSnapshot, refresh);
+  await click('錯誤');
+  await click('儲存判分');
+  expect(operationArea()?.textContent).toContain('結果待確認');
+  await showReview({ ...reviewSnapshot, review: { ...reviewSnapshot.review!, reviewRevision: 1 } }, refresh, 2);
+  expect(operationArea()?.textContent).toContain('尚未反映此次儲存');
+  expect(host.querySelector('.review-grade button')?.getAttribute('aria-pressed')).toBe('true');
+  expect(operationArea()?.textContent).toContain('修改尚未儲存');
+  expect(operationArea()?.textContent).toContain('請逐筆核對');
+  const save = () => [...host.querySelectorAll('button')].find(button => button.textContent === '儲存判分')!;
+  expect(save().disabled).toBe(true);
+  await click('保留草稿');
+  expect(save().disabled).toBe(false);
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/review'))).toHaveLength(1);
+});
+
+it('儲存遭拒會保留改判，仍可核對並重試', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(input => Promise.resolve(String(input).endsWith('/review')
+    ? Response.json({ code: 'INVALID_GRADE', message: '請重新核對改判項目。' }, { status: 422 }) : Response.json([])));
+  await showReview(reviewSnapshot, vi.fn());
+  await click('錯誤');
+  await click('儲存判分');
+  expect(operationArea()?.querySelector('[role=alert]')?.textContent).toBe('請重新核對改判項目。');
+  expect(host.querySelector('.review-grade [aria-pressed=true]')?.textContent).toBe('錯誤');
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === '確認定案')?.disabled).toBe(true);
+});
+
+it('過期改判與新版同值時也須核對，核對後的草稿不會隨後續改判重現', async () => {
+  const refresh = vi.fn(() => 1);
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(input => Promise.resolve(String(input).endsWith('/review')
+    ? Response.json({ code: 'REVIEW_REVISION_CHANGED', message: '判分內容已更新，請核對最新版本後再操作。' }, { status: 409 }) : Response.json([])));
+  const find = (label: string) => [...host.querySelectorAll('button')].find(button => button.textContent === label)!;
+  await showReview(reviewSnapshot, refresh);
+  await click('錯誤');
+  await click('儲存判分');
+  await showReview({
+    ...reviewSnapshot,
+    review: { ...reviewSnapshot.review!, reviewRevision: 1 },
+    groups: [{ ...reviewSnapshot.groups![0], answers: [{ questionId: 'q', text: '原文', correct: false }] }],
+  }, refresh, 1);
+  expect(operationArea()?.textContent).toContain('目前草稿：錯誤');
+  expect(operationArea()?.textContent).toContain('最新已存值：錯誤');
+  expect(find('確認定案').disabled).toBe(true);
+  expect(find('儲存判分').disabled).toBe(true);
+  await click('保留草稿');
+  expect(find('確認定案').disabled).toBe(false);
+  await showReview({ ...reviewSnapshot, review: { ...reviewSnapshot.review!, reviewRevision: 2 } }, refresh, 1);
+  expect(host.querySelector('.review-grade [aria-pressed=true]')?.textContent).toBe('正確');
+  expect(operationArea()?.textContent).not.toContain('尚未儲存');
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/review'))).toHaveLength(1);
+});
+
+it('定案回應遺失且下一份快照已開下一題時，仍就地讀回原回合結果', async () => {
+  let finish!: (reason: Error) => void;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    if (input === '/api/rounds/r/publish') return new Promise((_, reject) => { finish = reject; });
+    if (input === '/api/rounds/r/results') {
+      expect(new Headers(init?.headers).get('X-Classroom-Id')).toBe('c');
+      return Promise.resolve(Response.json([{ winnerGroupId: 'g', groups: [{ groupId: 'g', groupName: '甲組' }] }]));
+    }
+    return Promise.resolve(Response.json([]));
+  });
+  const refresh = vi.fn(() => 1);
+  await showReview(reviewSnapshot, refresh);
+  const region = operationArea();
+  await click('確認定案');
+  await showReview({ ...closedSnapshot, phase: 'active', roundId: 'next', unit: reviewSnapshot.unit }, refresh, 1);
+  await act(async () => finish(new TypeError()));
+  expect(operationArea()).toBe(region);
+  expect(region?.textContent).toContain('已定案。勝組：甲組');
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/publish')).map(([url]) => url)).toEqual(['/api/rounds/r/publish']);
+  expect(fetch.mock.calls.filter(([url]) => /^\/api\/rounds\/.+\/results$/.test(String(url))).map(([url]) => url)).toEqual(['/api/rounds/r/results']);
+  expect([...host.querySelectorAll('button')].some(button => button.textContent === '結束搶答')).toBe(true);
+});
+
+it('切換功能頁後保留同回合的判分、資格草稿與新版核對，其他回合和活動各自獨立', async () => {
+  const refresh = vi.fn(() => 1);
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([]));
+  const publishButton = () => [...operationArea()!.querySelectorAll('button')].find(button => button.textContent === '確認定案')!;
+  const selectedGrade = () => host.querySelector('.review-grade [aria-pressed=true]')?.textContent;
+  await showReview(reviewSnapshot, refresh);
+  await click('錯誤');
+  await click('甲組取消資格');
+  expect(publishButton().disabled).toBe(true);
+  await showReview(reviewSnapshot, refresh, 0, 'settings');
+  expect(operationArea() && !operationArea()?.closest('[hidden]')).toBeFalsy();
+  await showReview(reviewSnapshot, refresh);
+  expect(selectedGrade()).toBe('錯誤');
+  expect(host.textContent).toContain('本回合已取消資格');
+  expect(host.querySelector('.review-supplements')?.textContent).toContain('標準答案');
+  expect(publishButton().disabled).toBe(true);
+
+  const newer = { ...reviewSnapshot, review: { ...reviewSnapshot.review!, reviewRevision: 1 } };
+  await showReview(newer, refresh, 0, 'settings');
+  await showReview(newer, refresh);
+  expect(operationArea()?.querySelectorAll('.review-conflict')).toHaveLength(2);
+  expect(publishButton().disabled).toBe(true);
+  expect([...operationArea()!.querySelectorAll('button')].find(button => button.textContent === '儲存判分')?.disabled).toBe(true);
+  await showReview({ ...newer, roundId: 'next', closedRoundIds: ['r'] }, refresh);
+  expect(selectedGrade()).toBe('正確');
+  expect(publishButton().disabled).toBe(false);
+  await click('錯誤');
+  await showReview({ ...newer, roundId: 'next' }, refresh, 0, 'console', { ...reviewSession, activityId: '另一活動' });
+  expect(selectedGrade()).toBe('正確');
+  expect(publishButton().disabled).toBe(false);
+});
+
+it('定案下一回合後，前一回合仍可完成讀回並在自己的操作區顯示結果', async () => {
+  let finishFirstRead!: (result: Response) => void;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(input => {
+    if (input === '/api/rounds/r/publish') return Promise.reject(new TypeError());
+    if (input === '/api/rounds/r/results') return new Promise(resolve => { finishFirstRead = resolve; });
+    if (input === '/api/rounds/next/publish') return Promise.resolve(Response.json({ id: 'next', phase: 'ended', winnerGroupId: null }));
+    return Promise.resolve(Response.json([]));
+  });
+  const refresh = vi.fn(() => 1);
+  await showReview(reviewSnapshot, refresh);
+  await click('確認定案');
+  const firstOperation = operationArea();
+  await showReview({ ...reviewSnapshot, roundId: 'next', closedRoundIds: ['r'] }, refresh, 1);
+  expect(firstOperation?.textContent).toContain('正在確認勝組');
+  const secondOperation = host.querySelectorAll('.review-actions')[1];
+  await click('確認定案');
+  await showReview({ ...closedSnapshot, closedRoundIds: ['r', 'next'] }, refresh, 1);
+  expect(secondOperation.textContent).toContain('已定案。無勝組');
+  expect(firstOperation?.isConnected).toBe(true);
+  await act(async () => finishFirstRead(Response.json([{ winnerGroupId: 'g', groups: [{ groupId: 'g', groupName: '甲組' }] }])));
+  expect(firstOperation?.textContent).toContain('已定案。勝組：甲組');
+  expect(secondOperation.textContent).toContain('已定案。無勝組');
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/publish')).map(([url]) => url))
+    .toEqual(['/api/rounds/r/publish', '/api/rounds/next/publish']);
+  expect(fetch.mock.calls.filter(([url]) => url === '/api/rounds/r/results')).toHaveLength(1);
+  await click('關閉定案結果');
+  expect(firstOperation?.isConnected).toBe(false);
+  expect(secondOperation.isConnected).toBe(true);
+});
+
+it.each([
+  { lateReply: '連線失敗', winner: 'g', expected: '勝組：甲組' },
+  { lateReply: '版本衝突', winner: null, expected: '無勝組' },
+])('結果讀取失敗後收到較晚的$lateReply，仍可在下一回合就地重試原結果', async ({ lateReply, winner, expected }) => {
+  const publishPath = '/api/rounds/r/publish';
+  const resultPath = '/api/rounds/r/results';
+  let finishPublication!: () => void;
+  let reads = 0;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
+    if (input === publishPath) {
+      return new Promise((resolve, reject) => {
+        finishPublication = () => {
+          if (lateReply === '連線失敗') reject(new TypeError());
+          else resolve(Response.json({ code: 'REVIEW_REVISION_CHANGED', message: '判分內容已更新。' }, { status: 409 }));
+        };
+      });
+    }
+    if (input === resultPath) {
+      if (++reads === 1) return Response.json({ message: '暫時無法取得結果。' }, { status: 503 });
+      return Response.json([{ winnerGroupId: winner, groups: [{ groupId: 'g', groupName: '甲組' }] }]);
+    }
+    return Response.json([]);
+  });
+  const refresh = vi.fn(() => 1);
+  await showReview(reviewSnapshot, refresh);
+  await click('確認定案');
+  await showReview(closedSnapshot, refresh);
+  const original = operationArea();
+  const retry = () => [...original!.querySelectorAll('button')].find(button => button.textContent === '重新取得定案結果');
+  expect(retry()).toBeDefined();
+
+  await act(async () => finishPublication());
+  expect(original?.querySelector('[role=alert]')?.textContent).toContain('請重新取得結果');
+  expect(retry()).toBeDefined();
+  await showReview({ ...closedSnapshot, phase: 'active', roundId: 'next', unit: reviewSnapshot.unit }, refresh, 1);
+  expect(operationArea()).toBe(original);
+  expect(retry()).toBeDefined();
+  await click('重新取得定案結果');
+  expect(original?.textContent).toContain(`已定案。${expected}`);
+  expect(retry()).toBeUndefined();
+  expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/publish')).map(([url]) => url)).toEqual([publishPath]);
+  expect(fetch.mock.calls.filter(([url]) => /^\/api\/rounds\/.+\/results$/.test(String(url))).map(([url]) => url))
+    .toEqual([resultPath, resultPath]);
+});

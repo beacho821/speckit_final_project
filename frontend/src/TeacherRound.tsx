@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeAcceptedAnswers, type ActivityView, type CatalogUnit, type QuestionCardEdit,
   type QuestionCardSaved, type QuestionPartEdit, type SessionResponse } from '../../shared/api';
 import { activityHeaders, readError } from './api';
@@ -9,6 +9,9 @@ import QuestionQueue from './QuestionQueue';
 import { questionLabel } from './question-label';
 
 export type TeacherAction = (path: string, body?: unknown, method?: 'POST' | 'PATCH' | 'PUT' | 'DELETE') => Promise<boolean>;
+export type ReviewAction = (path: string, body: unknown, method: 'POST' | 'PATCH', signal: AbortSignal) => Promise<
+  { kind: 'ok'; data: unknown } | ({ kind: 'rejected'; status: number } & Awaited<ReturnType<typeof readError>>) | { kind: 'unknown' }
+>;
 
 interface Props {
   session: SessionResponse;
@@ -49,12 +52,48 @@ export default function TeacherRound({ session, credential, view, syncError = ''
   const actionRequest = useRef<AbortController | null>(null);
   const [drafts, setDrafts] = useState<Record<string, QuestionDraft>>({});
   const [saved, setSaved] = useState<Record<string, QuestionCardSaved>>({});
+  const [lastReview, setLastReview] = useState<{ scope: string; view: ActivityView }>();
+  const [pendingPublications, setPendingPublications] = useState(() => new Map<string, { scope: string; view: ActivityView }>());
   const pendingCard = useRef<{ id: string; key: string; edit: QuestionCardEdit } | null>(null);
   const editButton = useRef<HTMLButtonElement | null>(null);
   const returnFocus = useRef(false);
   const queueHeading = useRef<HTMLHeadingElement>(null);
   const awaitingSnapshot = pendingRefresh !== undefined && completedRefresh < pendingRefresh;
   const disabled = blocked || busy || awaitingSnapshot;
+  const scope = JSON.stringify([session.classroomId, session.activityId, session.activityEpoch]);
+  const liveReview = view?.phase === 'reviewing' && view.roundId && view.review ? view : undefined;
+  const prior = lastReview?.scope === scope ? lastReview.view : undefined;
+  const closedReview = prior?.roundId && (!view?.roundId || view.roundId === prior.roundId)
+    && view?.closedRoundIds.includes(prior.roundId) ? prior : undefined;
+  const reviewView = liveReview ?? closedReview;
+  const reviewIsClosed = !!closedReview && !liveReview;
+  const carriedReviews = [...pendingPublications.values()]
+    .filter(publication => publication.scope === scope && publication.view.roundId
+      && reviewView?.roundId !== publication.view.roundId && view?.closedRoundIds.includes(publication.view.roundId))
+    .map(publication => publication.view);
+  const visibleReviews = reviewView ? [...carriedReviews, reviewView] : carriedReviews;
+  const settlePublication = useCallback((path: string) => {
+    const key = JSON.stringify([scope, path]);
+    setPendingPublications(current => {
+      if (!current.has(key)) return current;
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+  }, [scope]);
+  const readRoundResult = useCallback(async (path: string, signal: AbortSignal): Promise<unknown> => {
+    const response = await fetch(`${path}/results`, { headers: activityHeaders(session, credential), signal });
+    if (!response.ok) {
+      const issue = await readError(response);
+      if (!signal.aborted && (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED')) onExpired?.();
+      throw new Error(issue.message);
+    }
+    return response.json();
+  }, [session, credential, onExpired]);
+  useEffect(() => {
+    if (liveReview) setLastReview({ scope, view: liveReview });
+    else if (view?.roundId && view.roundId !== prior?.roundId) setLastReview(undefined);
+  }, [liveReview, scope, view?.roundId, prior?.roundId]);
   useEffect(() => {
     if (!deleting || busy || deleting.revision === view?.catalogRevision) return;
     deleteDialog.current?.close();
@@ -63,9 +102,10 @@ export default function TeacherRound({ session, credential, view, syncError = ''
   useEffect(() => { setSelected(''); }, [session.activityId, view?.worksheetPreview?.source.importedAt]);
   useEffect(() => {
     setDrafts({}); setSaved({}); setBusy(false); setPendingRefresh(undefined); setMessage('');
+    setPendingPublications(new Map());
     pendingCard.current = null;
     return () => actionRequest.current?.abort();
-  }, [session.activityId]);
+  }, [scope]);
   useEffect(() => {
     if (selected || !returnFocus.current) return;
     returnFocus.current = false;
@@ -137,6 +177,35 @@ export default function TeacherRound({ session, credential, view, syncError = ''
       if (!controller.signal.aborted) setBusy(false);
     }
   }
+
+  const reviewAction: ReviewAction = async (path, body, method, signal) => {
+    if (signal.aborted || (actionRequest.current && !actionRequest.current.signal.aborted)) return { kind: 'unknown' };
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    actionRequest.current = controller;
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await fetch(path, {
+        method, signal: controller.signal,
+        headers: { ...activityHeaders(session, credential), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (response.ok) return { kind: 'ok', data: await response.json() };
+      const issue = await readError(response);
+      if (!controller.signal.aborted && (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED')) onExpired?.();
+      return response.status >= 500 ? { kind: 'unknown' } : { kind: 'rejected', status: response.status, ...issue };
+    } catch {
+      return { kind: 'unknown' };
+    } finally {
+      signal.removeEventListener('abort', abort);
+      if (actionRequest.current === controller) {
+        actionRequest.current = null;
+        setBusy(false);
+      }
+    }
+  };
 
   function closeEditor(key: string) {
     setDrafts(current => {
@@ -310,7 +379,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
         {message && <p className="muted" role="status">{message}</p>}
       </dialog>
     </>}
-    {showConsole && <>
+    <div hidden={!showConsole}>
       <div className="section-heading console-heading"><h2>{title}</h2>
         {!running && next && <button className="primary" disabled={disabled || Boolean(preparationIssue)}
           onClick={() => void action('/api/rounds/open-next', { unitId: next.id, catalogRevision })}>開放搶答</button>}
@@ -327,16 +396,27 @@ export default function TeacherRound({ session, credential, view, syncError = ''
       <div className={view.phase === 'active' ? 'console-grid' : undefined}>
         <div>
           {running && view.unit?.questions?.map(question => <p key={question.questionId} className="question-prompt"><b>{questionLabel(question)}</b> {question.prompt}</p>)}
-          {view.phase === 'reviewing' && roundPath && view.review && <RoundReview
-            key={roundPath} roundPath={roundPath} questions={view.unit?.questions ?? []} groups={view.groups ?? []}
-            review={view.review} disabled={disabled} action={action} classMode={mode === 'console'} />}
+          {visibleReviews.map(snapshot => {
+            if (!snapshot.roundId || !snapshot.review) return null;
+            const path = `/api/rounds/${encodeURIComponent(snapshot.roundId)}`;
+            const carried = snapshot !== reviewView;
+            return <RoundReview key={JSON.stringify([scope, snapshot.roundId])} roundPath={path}
+              questions={snapshot.unit?.questions ?? []} groups={snapshot.groups ?? []} review={snapshot.review}
+              disabled={disabled} action={reviewAction} closed={carried || reviewIsClosed} refresh={refresh} completedRefresh={completedRefresh}
+              readRoundResult={readRoundResult} classMode={mode !== 'combined'}
+              onPublicationStarted={() => {
+                const key = JSON.stringify([scope, path]);
+                setPendingPublications(current => new Map(current).set(key, { scope, view: snapshot }));
+              }}
+              onPublicationSettled={settlePublication} onDismissResult={carried ? () => settlePublication(path) : undefined} />;
+          })}
         </div>
         {view.phase === 'active' && view.groups && <div className="group-progress">{view.groups.map(group => <article className="progress-card" key={group.id}>
           <div><strong>{group.name}</strong><span className={group.received ? 'status received' : 'status'}>{group.received ? `已送出 · 第 ${group.rank} 順位` : '尚未送出'}</span></div>
           {group.answers?.map(answer => <p key={answer.questionId}><span>{questionLabel(view.unit?.questions?.find(question => question.questionId === answer.questionId) ?? answer)}</span>{answer.text}</p>)}
         </article>)}</div>}
       </div>
-      {(session.classroomId || view.closedRoundIds.length > 0) && <RoundHistory session={session} credential={credential} roundIds={view.closedRoundIds} snapshot={fullSnapshot} />}
-    </>}
+      {showConsole && (session.classroomId || view.closedRoundIds.length > 0) && <RoundHistory session={session} credential={credential} roundIds={view.closedRoundIds} snapshot={fullSnapshot} />}
+    </div>
   </section>;
 }

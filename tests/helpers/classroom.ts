@@ -77,17 +77,8 @@ export async function classroom(services: AppServices = {}, directory?: Classroo
   async function publishReviewedRound(roundId: string) {
     const view = await (await request('/view')).json() as ActivityView;
     const review = view.review;
-    if (!review) throw new Error('回合尚未停止收件。');
-    let reviewRevision = review.reviewRevision;
-    if (review.missingSupplementQuestionIds.length) {
-      const saved = await request(`/rounds/${roundId}/review`, teacher, {
-        reviewRevision,
-        supplements: review.missingSupplementQuestionIds.map(questionId => ({ questionId, text: '測試補答' })),
-      }, 'PATCH');
-      if (!saved.ok) throw new Error(`測試補答失敗：${saved.status}`);
-      reviewRevision = (await saved.json()).reviewRevision;
-    }
-    const published = await request(`/rounds/${roundId}/publish`, teacher, { reviewRevision }, 'POST');
+    if (view.roundId !== roundId || !review) throw new Error('回合尚未停止收件。');
+    const published = await request(`/rounds/${roundId}/publish`, teacher, { reviewRevision: review.reviewRevision }, 'POST');
     if (!published.ok) throw new Error(`測試公布失敗：${published.status}`);
     return published;
   }

@@ -61,7 +61,13 @@ export interface Answer {
 export interface Submission { disqualified?: boolean; groupId: string; rank: number; receivedAt: number; receivedOn?: number; answers: Answer[] }
 export interface GradeEdit { groupId: string; questionId: string; correct: boolean }
 export interface TeacherSupplement { questionId: string; text: string }
-export interface ReviewView { reviewRevision: number; missingSupplementQuestionIds: string[]; supplements: TeacherSupplement[] }
+export interface SupplementCandidate extends TeacherSupplement { source: 'legacy' | 'configured' }
+export interface ReviewView {
+  reviewRevision: number;
+  supplementCandidates: SupplementCandidate[];
+  missingSupplementQuestionIds: string[];
+  supplements: TeacherSupplement[];
+}
 export interface Round {
   id: string;
   unitId: string;

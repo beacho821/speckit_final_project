@@ -3,7 +3,7 @@ export const worksheet:Worksheet={source:{kind:'google',documentId:'isolated',sh
 
 import type { Activity } from '../../backend/src/activity.js';
 import { worksheetUnits } from '../../backend/src/questions.js';
-import { endRound, publishRound, reviewFor, updateReview } from '../../backend/src/rounds.js';
+import { endRound, publishRound } from '../../backend/src/rounds.js';
 
 export function configureWorksheet(activity: Activity, answers: (questionId: string) => string[] = () => ['答案']) {
   if (!activity.worksheet) throw new Error('測試學習單尚未設定。');
@@ -19,13 +19,6 @@ export function configureWorksheet(activity: Activity, answers: (questionId: str
 
 export function finishRound(activity: Activity, roundId: string) {
   const round = endRound(activity, roundId);
-  const { missingSupplementQuestionIds } = reviewFor(round);
-  if (missingSupplementQuestionIds.length) {
-    updateReview(activity, roundId, {
-      reviewRevision: round.reviewRevision,
-      supplements: missingSupplementQuestionIds.map(questionId => ({ questionId, text: '測試補答' })),
-    });
-  }
   publishRound(activity, roundId, round.reviewRevision);
   return round;
 }

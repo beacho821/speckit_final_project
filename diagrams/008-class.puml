@@ -1,0 +1,35 @@
+@startuml
+!pragma layout smetana
+title 自動補答與逐筆改判｜類別圖
+class "回合" as Round
+class "子題" as Question {
+  開題時依序設定的標準答案
+}
+class "組別作答" as Submission {
+  原始答案
+  收件順位
+  自動判分
+  教師判定
+}
+class "組別資格" as Eligibility
+class "補答候選" as Candidate {
+  已存人工原文或首個非空白標準答案
+  來源
+}
+class "封存補答" as Supplement {
+  題目識別
+  採用的原文
+}
+class "定案結果" as Result {
+  勝組或無勝組
+}
+Round "1" -- "1..*" Question
+Round "1" -- "0..*" Eligibility
+Question "1" -- "0..*" Submission
+Eligibility "1" -- "0..*" Submission
+Question "1" -- "0..1" Candidate : 已存人工補答優先
+Candidate ..> Supplement : 定案時仍無具資格組別答對
+Round "1" -- "0..1" Result
+Result "1" -- "0..*" Supplement
+Result ..> Submission : 依有效判分與順位
+@enduml

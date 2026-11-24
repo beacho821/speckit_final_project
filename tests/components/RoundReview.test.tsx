@@ -3,61 +3,87 @@ import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import RoundReview from '../../frontend/src/RoundReview';
 import type { ActivityView } from '../../shared/api';
-import { host, render } from '../helpers/ui';
+import type { ReviewAction } from '../../frontend/src/TeacherRound';
+import { click, host, render } from '../helpers/ui';
 
-it('老師雙向改判更新補答欄，並保留同回合過期草稿供核對', async () => {
-  const review = { reviewRevision: 0, missingSupplementQuestionIds: [], supplements: [] };
-  const groups: ActivityView['groups'] = [{ id:'甲', name:'甲組', received:true, rank:1, answers:[{questionId:'1',text:'CPU',autoCorrect:true,correct:true}] }];
-  const action = vi.fn().mockResolvedValue(true);
-  const show = (revision = 0) => render(<RoundReview roundPath="/api/rounds/r" questions={[{questionId:'1',prompt:'處理器簡稱？',missingPrompt:false}]} groups={groups} review={{...review,reviewRevision:revision}} disabled={false} action={action} />);
-  await show();
-  expect(host.textContent).toContain('自動判分：答對');
+const questions = [1, 2].map(partNumber => ({ questionId: `原${partNumber}`, questionNumber: 3, partNumber, prompt: '題幹', missingPrompt: false }));
+const button = (label: string) => [...host.querySelectorAll('button')].find(item => item.textContent === label)!;
+function group(secondCorrect: boolean): NonNullable<ActivityView['groups']> {
+  return [{ id: 'g', name: '甲組', rank: 1, received: true, answers: questions.map(({ questionId }, i) => ({
+    questionId, text: `甲組原文${i + 1}`, correct: i === 0 || secondCorrect, autoCorrect: i === 0,
+  })) }];
+}
+
+const candidates = [
+  { questionId: '原1', text: '舊人工原文', source: 'legacy' as const },
+  { questionId: '原2', text: '第二題標準答案', source: 'configured' as const },
+];
+function review(revision = 0, supplementCandidates = candidates) {
+  return { reviewRevision: revision, supplements: [], missingSupplementQuestionIds: [], supplementCandidates };
+}
+
+it('無人送答可直接定案，舊人工與自動補答為只讀', async () => {
+  const action = vi.fn<ReviewAction>().mockResolvedValue({ kind: 'ok', data: { id: 'r', phase: 'ended', winnerGroupId: null } });
+  await render(<RoundReview roundPath="/api/rounds/r" questions={questions} groups={[]}
+    review={review()} disabled={false} action={action} classMode />);
+  expect(host.textContent).toMatch(/老師補答[\s\S]*舊人工原文/);
+  expect(host.textContent).toMatch(/自動補答[\s\S]*第二題標準答案/);
   expect(host.querySelector('textarea')).toBeNull();
-  const select = host.querySelector('select')!;
-  await act(async () => {
-    select.value = 'false';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  expect(host.querySelector('textarea')?.labels?.[0]?.textContent).toContain('老師補答');
-  const textarea = host.querySelector('textarea')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '老師答案');
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await show(1);
-  expect(host.textContent).toContain('已有更新');
-  expect(host.querySelector('textarea')?.value).toBe('老師答案');
-  const confirm = [...host.querySelectorAll('button')].find(button => button.textContent?.includes('使用最新版本'))!;
-  await act(async () => confirm.click());
-  await act(async () => {
-    select.value = 'true';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  expect(host.querySelector('textarea')?.readOnly).toBe(true);
-  const save = [...host.querySelectorAll('button')].find(button => button.textContent === '儲存判分與補答')!;
-  await act(async () => save.click());
-  expect(action).toHaveBeenCalledWith('/api/rounds/r/review', {reviewRevision:1,grades:[{groupId:'甲',questionId:'1',correct:true}],supplements:[]},'PATCH');
+  expect(button('儲存判分').disabled).toBe(true);
+  await click('確認定案');
+  expect(action).toHaveBeenCalledExactlyOnceWith('/api/rounds/r/publish', { reviewRevision: 0 }, 'POST', expect.any(AbortSignal));
 });
 
-it('其他分頁改成有組答對後，舊補答仍可複製且不提交', async () => {
-  const action = vi.fn().mockResolvedValue(true);
-  const show = (revision:number, correct:boolean) => render(<RoundReview roundPath="/api/rounds/r"
-    questions={[{questionId:'1',prompt:'處理器簡稱？',missingPrompt:false}]}
-    groups={[{id:'甲',name:'甲組',received:true,rank:1,answers:[{questionId:'1',text:'新寫法',autoCorrect:false,correct}]}]}
-    review={{reviewRevision:revision,missingSupplementQuestionIds:correct?[]:['1'],supplements:[]}} disabled={false} action={action}/>);
-  await show(0,false);
-  const field = host.querySelector('textarea')!;
-  await act(async()=>{
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,'過期但可複製的補答');
-    field.dispatchEvent(new Event('input',{bubbles:true}));
+it('只有欠答題有補答，無來源時僅提示', async () => {
+  const action = vi.fn<ReviewAction>();
+  await render(<RoundReview roundPath="/api/rounds/r" questions={questions} groups={group(false)}
+    review={review()} disabled={false} action={action} classMode />);
+  expect(host.textContent).not.toContain('舊人工原文');
+  expect(host.textContent).toContain('第二題標準答案');
+  await render(<RoundReview roundPath="/api/rounds/r" questions={questions} groups={group(false)}
+    review={review(0, [])} disabled={false} action={action} classMode />);
+  expect(host.textContent).toContain('沒有可引用的答案');
+  expect(button('確認定案').disabled).toBe(false);
+});
+
+it('兩組四筆作答只改指定判分，補答依更正和資格即時更新', async () => {
+  const [first] = group(false);
+  const groups = [first, { ...first, id: 'h', name: '乙組', rank: 2, answers: first.answers!.map((answer, i) =>
+    ({ ...answer, text: `乙組原文${i + 1}` })) },
+  { id: 'empty', name: '未送答組', received: false }];
+  const action = vi.fn<ReviewAction>().mockResolvedValue({ kind: 'ok', data: { reviewRevision: 1 } });
+  await render(<RoundReview roundPath="/api/rounds/r" questions={questions} groups={groups}
+    review={review()} disabled={false} action={action} classMode />);
+  const answers = [...host.querySelectorAll<HTMLElement>('[role="group"]')];
+  const pressed = () => answers.map(answer => answer.querySelector('[aria-pressed="true"]')?.textContent);
+  const toggle = (value: '錯誤' | '正確') => act(async () => {
+    [...answers[1].querySelectorAll('button')].find(item => item.textContent === value)!.click();
   });
-  await show(1,true);
-  expect(host.querySelector('textarea')?.readOnly).toBe(true);
-  expect(host.querySelector('textarea')?.value).toBe('過期但可複製的補答');
-  const adopt = [...host.querySelectorAll('button')].find(b=>b.textContent?.includes('使用最新版本'))!;
-  await act(async()=>adopt.click());
-  const save = [...host.querySelectorAll('button')].find(b=>b.textContent==='儲存判分與補答')!;
-  await act(async()=>save.click());
+  const supplement = () => host.querySelector('.review-supplements')?.textContent;
+  expect(answers).toHaveLength(4);
+  expect(answers.every(answer => answer.querySelectorAll('button').length === 2 && answer.querySelectorAll('[aria-pressed="true"]').length === 1)).toBe(true);
+  expect(answers[1].getAttribute('aria-label')).toBe('甲組 · 第 3 題，第 2 部分');
+  expect(host.querySelector('.review-group h3')?.textContent).toBe('甲組 · 第 1 順位');
+  expect(pressed()).toEqual(['正確', '錯誤', '正確', '錯誤']);
+  await toggle('錯誤');
+  expect(button('儲存判分').disabled).toBe(true);
   expect(action).not.toHaveBeenCalled();
-  expect(host.querySelector('textarea')?.value).toBe('過期但可複製的補答');
+  await toggle('正確');
+  expect(pressed()).toEqual(['正確', '正確', '正確', '錯誤']);
+  expect(answers[1].textContent).toContain('甲組原文2');
+  expect(answers[1].textContent).toContain('自動判分：答錯');
+  expect(supplement()).toBeUndefined();
+  expect(button('確認定案').disabled).toBe(true);
+  await toggle('錯誤');
+  expect(supplement()).toContain('第二題標準答案');
+  expect(button('儲存判分').disabled).toBe(true);
+  await click('甲組取消資格');
+  await toggle('正確');
+  expect(supplement()).toContain('第二題標準答案');
+  await click('甲組恢復資格');
+  expect(supplement()).toBeUndefined();
+  await click('儲存判分');
+  expect(action).toHaveBeenCalledExactlyOnceWith('/api/rounds/r/review', {
+    reviewRevision: 0, grades: [{ groupId: 'g', questionId: '原2', correct: true }],
+  }, 'PATCH', expect.any(AbortSignal));
 });

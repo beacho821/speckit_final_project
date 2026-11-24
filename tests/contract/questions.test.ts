@@ -71,23 +71,42 @@ it('純手動回合自動判分、改判及補答可公布，CSV 保留一筆補
     expect(JSON.stringify(studentReview)).not.toContain('測試標準甲');
     const change = (body: unknown) => c.request(path+'/review',c.teacher,body,'PATCH');
     expect((await c.request(path+'/review',students[0].headers,{reviewRevision:0,grades:[]},'PATCH')).status).toBe(403);
-    expect((await change({reviewRevision:0,grades:[{groupId:b.id,questionId:question.questionId,correct:false}]})).status).toBe(200);
+    const modified = await change({ reviewRevision: 0, grades: [{ groupId: b.id, questionId: question.questionId, correct: false }] });
+    expect(modified.status).toBe(200);
+    expect(await modified.json()).toMatchObject({
+      supplementCandidates: [{ questionId: question.questionId, text: '測試標準甲', source: 'configured' }],
+      supplements: [{ questionId: question.questionId, text: '測試標準甲' }],
+    });
     expect((await change({reviewRevision:0,supplements:[{questionId:question.questionId,text:'過期草稿'}]})).status).toBe(409);
-    const firstPublish = await post('/publish',{reviewRevision:1});
-    expect(firstPublish.status).toBe(422);
-    expect(await firstPublish.json()).toMatchObject({details:{missingSupplementQuestionIds:[question.questionId]}});
-    expect((await change({reviewRevision:1,supplements:[{questionId:question.questionId,text:'老師答案,含"引號"\n下一行'}]})).status).toBe(200);
+    const saved = structuredClone(c.activity.rounds[0]);
+    expect((await change({ reviewRevision: 1, grades: [{ groupId: a.id, questionId: question.questionId, correct: true }],
+      supplements: [{ questionId: question.questionId, text: '不可寫入' }] })).status).toBe(422);
+    expect(c.activity.rounds[0]).toEqual(saved);
     expect((await (await c.request('/view',students[0].headers)).json()).version).toBe(studentReview.version);
-    expect(await (await post('/publish',{reviewRevision:2})).json()).toMatchObject({phase:'ended',winnerGroupId:null});
-    expect((await post('/publish',{reviewRevision:2})).status).toBe(200);
+    expect(studentReview.review).toBeUndefined();
+    expect(await (await post('/publish',{reviewRevision:1})).json()).toMatchObject({phase:'ended',winnerGroupId:null});
+    const sealed = structuredClone(c.activity.rounds[0]);
+    for (const [body, status, code] of [
+      [{}, 422, 'INVALID_REVIEW_REVISION'],
+      [{ reviewRevision: '1' }, 422, 'INVALID_REVIEW_REVISION'],
+      [{ reviewRevision: 1.5 }, 422, 'INVALID_REVIEW_REVISION'],
+      [{ reviewRevision: 0 }, 409, 'REVIEW_REVISION_CHANGED'],
+    ] as const) {
+      const invalid = await post('/publish', body);
+      expect(invalid.status).toBe(status);
+      expect(await invalid.json()).toMatchObject({ code, message: expect.any(String) });
+      expect(c.activity.rounds[0]).toEqual(sealed);
+    }
+    expect(await (await post('/publish', { reviewRevision: 1 })).json()).toEqual({ id: round.id, phase: 'ended', winnerGroupId: null });
+    expect(c.activity.rounds[0]).toEqual(sealed);
     const published = await (await c.request(path+'/results',students[0].headers)).json();
-    expect(published[0]).toMatchObject({publishedAnswer:'老師答案,含"引號"\n下一行',ownAnswer:'錯誤原文',correct:false,questionNumber:1});
-    expect(JSON.stringify(published)).not.toMatch(/測試標準甲|測試標準乙|groups/);
+    expect(published[0]).toMatchObject({publishedAnswer:'測試標準甲',ownAnswer:'錯誤原文',correct:false,questionNumber:1});
+    expect(JSON.stringify(published)).not.toMatch(/測試標準乙|groups/);
     const csv = await (await c.request('/results.csv')).text();
     expect(csv).toContain('題號,組別,答案,搶答順位,作答狀態,正誤');
     expect(csv).toContain('1,乙組, 測試標準乙 ,2,已送出,答錯');
     expect(csv.match(/,老師補答,/g)).toHaveLength(1);
-    expect(csv).toContain('"老師答案,含""引號""\n下一行"');
+    expect(csv).toContain('1,,測試標準甲,,老師補答,');
     expect((await (await c.request('/results.csv')).text())).toBe(csv);
   } finally { await c.close(); }
 });
