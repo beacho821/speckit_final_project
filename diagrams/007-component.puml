@@ -1,0 +1,20 @@
+@startuml
+!pragma layout smetana
+title 教師定案與學生倒數提示｜組件圖
+left to right direction
+actor "教師" as Teacher
+actor "學生" as Student
+rectangle "回合審核畫面" as Review
+rectangle "儲存與定案操作區" as Actions
+rectangle "回合審核與定案規則" as Rules
+rectangle "學生作答區" as Draft
+rectangle "公平等待與收件狀態" as Timing
+
+Teacher --> Review : 改判或補答
+Teacher --> Actions : 定位待補答欄位、儲存或定案
+Review -right-> Actions : 草稿與待補答題號
+Actions --> Rules : 核對已儲存內容並定案
+Rules --> Actions : 進度、結果與處理方式
+Student --> Draft : 填答並送出
+Timing --> Draft : 等待秒數及收件狀態
+@enduml

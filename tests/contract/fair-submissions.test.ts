@@ -42,6 +42,7 @@ describe('公平送出 HTTP 契約', () => {
       const waiting = await (await c.request('/view', alphaStudent.headers)).json();
       expect(waiting.waitRemainingMs).toBe(3000);
       expect(waiting.groups).toBeUndefined();
+      expect(await (await c.request('/view', betaStudent.headers)).json()).toMatchObject({ waitRemainingMs: 0 });
 
       now = 3499;
       const tooEarly = await c.request(`/rounds/${secondRound.id}/submissions`, alphaStudent.headers, { answers: answers(secondUnit), receivedAt: Number.MAX_SAFE_INTEGER }, 'POST');
@@ -57,6 +58,14 @@ describe('公平送出 HTTP 契約', () => {
       expect(alphaSubmission.status).toBe(201);
       expect(c.activity.rounds[1].submissions.map(item => item.rank)).toEqual([1, 2]);
       expect(c.activity.rounds[1].submissions.map(item => item.receivedAt)).toEqual([3500, 3500]);
+      await c.finishRound(secondRound.id);
+      const thirdUnit = c.activity.worksheet!.units[2];
+      const thirdRound = await (await c.request('/rounds', c.teacher, { unitId: thirdUnit.id }, 'POST')).json();
+      await c.startConfiguredRound(thirdRound.id, questionId => `${questionId}答案`);
+      await c.request(`/rounds/${thirdRound.id}/end`, c.teacher, undefined, 'POST');
+      now += 3000;
+      expect((await c.request(`/rounds/${thirdRound.id}/submissions`, alphaStudent.headers, { answers: answers(thirdUnit) }, 'POST')).status).toBe(409);
+      expect(c.activity.rounds[2].submissions).toHaveLength(0);
     } finally { await c.close(); }
   });
 
