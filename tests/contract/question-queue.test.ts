@@ -15,19 +15,18 @@ it('首次匯入保留手動題，舊版本無法移動清單或開題，重匯�
     }, { url: '測試來源' }, 'POST');
     expect((await importSheet()).status).toBe(200);
     const snapshot = await view();
-    expect(snapshot.queueUnitIds).toEqual([manualId]);
-    expect((await c.request('/question-queue', c.teacher, { unitId: 'u', catalogRevision: snapshot.catalogRevision }, 'POST')).status).toBe(200);
-    expect((await view()).queueUnitIds).toEqual(['u', manualId]);
+    expect(snapshot.queueUnitIds).toEqual(['u', manualId]);
+    expect((await c.request('/question-queue', c.teacher, { unitId: 'u', catalogRevision: snapshot.catalogRevision }, 'POST')).status).toBe(404);
     const live = await view();
     const mixed = await c.rawRequest('/question-queue', c.teacher,
       { worksheetUnitIds: [manualId], catalogRevision: live.catalogRevision }, 'PUT');
     expect(mixed.status).toBe(422);
     expect((await view()).queueUnitIds).toEqual(['u', manualId]);
-    expect((await c.request('/rounds/open-next', c.teacher, { unitId: 'u', catalogRevision: snapshot.catalogRevision }, 'POST')).status).toBe(409);
+    expect((await c.request('/rounds/open-next', c.teacher, { unitId: 'u', catalogRevision: snapshot.catalogRevision - 1 }, 'POST')).status).toBe(409);
     expect((await importSheet()).status).toBe(409);
     expect((await view()).queueUnitIds).toEqual(['u', manualId]);
     expect((await importSheet(true)).status).toBe(200);
-    expect((await view()).queueUnitIds).toEqual([]);
+    expect((await view()).queueUnitIds).toEqual(['u']);
     expect((await view()).questionCards.map((card: { id: string }) => card.id)).toEqual(['u']);
   } finally { await c.close(); }
 });
@@ -60,7 +59,27 @@ it('同一清單版本並行開題只成功一次，學生歷史各自顯示本�
       }, 'POST');
       expect(submitted.status).toBe(201);
     }
+    const studentView = async (index: number) => (await c.rawRequest('/view', students[index].headers)).json();
+    expect((await studentView(0)).ownAnswers).toEqual([{ questionId: question.questionId, text: '標準答案' }]);
+    const publish = () => c.rawRequest('/settlement/publish', c.teacher, undefined, 'POST');
+    expect((await publish()).status).toBe(409);
     await c.finishRound(round.id);
+    expect((await studentView(0)).ownAnswers[0].correct).toBe(true);
+    expect((await studentView(1)).ownAnswers[0].correct).toBe(false);
+    expect((await studentView(0)).settlement).toBeUndefined();
+    expect((await c.rawRequest('/settlement/publish', students[0].headers, undefined, 'POST')).status).toBe(403);
+    const projection = '/classrooms/' + c.room.id + '/projection';
+    const before = await (await c.request(projection)).json();
+    expect(before.settlement).toBeUndefined();
+    const waiting = c.request(projection + '?after=' + before.version);
+    expect((await publish()).status).toBe(200);
+    const summary = { roundCount: 1, groups: [
+      { id: first.id, name: first.name, wins: 1 },
+      { id: second.id, name: second.name, wins: 0 },
+      { id: third.id, name: third.name, wins: 0 },
+    ] };
+    expect((await (await waiting).json()).settlement).toEqual(summary);
+    expect((await studentView(2)).settlement).toEqual(summary);
     const a = await (await c.rawRequest(results, students[0].headers)).json();
     const b = await (await c.rawRequest(results, students[1].headers)).json();
     expect(a).toEqual([{ questionNumber: 1, partNumber: null, prompt: '請答題', ownAnswer: '標準答案', correct: true, publishedAnswer: null }]);
@@ -68,6 +87,10 @@ it('同一清單版本並行開題只成功一次，學生歷史各自顯示本�
     const unanswered = await (await c.rawRequest(results, students[2].headers)).json();
     expect(unanswered[0]).toMatchObject({ ownAnswer: null, correct: null, publishedAnswer: '標準答案' });
     expect((await (await c.rawRequest(results)).json())[0].groups).toHaveLength(3);
+    const next = await (await c.request('/questions', c.teacher, { prompt: '下一題' }, 'POST')).json();
+    const prepared = await (await c.request('/rounds', c.teacher, { unitId: next.unitId }, 'POST')).json();
+    expect((await c.startConfiguredRound(prepared.id)).status).toBe(200);
+    expect((await studentView(0)).settlement).toBeUndefined();
   } finally { await c.close(); }
 });
 

@@ -15,7 +15,7 @@ export function publishImportedWorksheet(activity: Activity, result: ImportResul
   const clearedRound = activity.rounds.some(round => round.phase === 'preparing');
   activity.worksheet = { ...result.worksheet, source: { ...result.worksheet.source, importedAt } };
   activity.units = [...imported, ...manual];
-  activity.queueUnitIds = manual.map(unit => unit.id);
+  activity.queueUnitIds = activity.units.map(unit => unit.id);
   activity.rounds = activity.rounds.filter(round => round.phase !== 'preparing');
   catalogChanged(activity, clearedRound ? ['teacher', ...activity.groups.map(group => `student:${group.id}`)] : undefined);
   if (clearedRound) projectionChanged(activity);

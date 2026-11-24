@@ -6,6 +6,7 @@ import type { RoundQuestion, StudentMember, Worksheet } from '../../shared/api.j
 
 export type StoredActivity = Pick<Activity, 'id' | 'groups' | 'rosterVersion' | 'rosterLocked' | 'worksheet' | 'units' | 'rounds'> & {
   queueUnitIds?: string[];
+  settlementPublished?: boolean;
   members: StudentMember[];
   startedAt: number;
   archivedAt?: number;
@@ -115,6 +116,7 @@ function recordFrom(raw: unknown, id: string): ClassroomRecord {
     if (!classroomId.test(activity.id) || !Number.isFinite(activity.startedAt)
       || (activity.archivedAt !== undefined && !Number.isFinite(activity.archivedAt))
       || !Number.isSafeInteger(activity.rosterVersion) || typeof activity.rosterLocked !== 'boolean'
+      || (activity.settlementPublished !== undefined && typeof activity.settlementPublished !== 'boolean')
       || !Array.isArray(activity.groups) || !Array.isArray(activity.members)
       || !Array.isArray(activity.units) || !Array.isArray(activity.rounds)
       || (activity.worksheet !== null && (!activity.worksheet?.source || !Array.isArray(activity.worksheet.fills) || !Array.isArray(activity.worksheet.units)))) {

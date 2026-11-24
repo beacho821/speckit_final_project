@@ -255,7 +255,6 @@ export default function TeacherRound({ session, credential, view, syncError = ''
     const card = byId.get(id);
     return !card?.opened && card?.questions[0]?.origin === 'worksheet';
   });
-  const addable = cards.filter(card => !queue.includes(card.id) && !card.opened);
   const next = view.nextUnitId ? byId.get(view.nextUnitId) : undefined;
   const roundPath = view.roundId ? `/api/rounds/${view.roundId}` : undefined;
   const title = view.phase === 'idle' && view.closedRoundIds.length ? '已定案' :
@@ -270,7 +269,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
   const lostDrafts = Object.entries(drafts).filter(([key, draft]) => draft.dirty
     && !cards.some(card => !card.opened && cardKey(card) === key));
 
-  function renderCard(card: QuestionCard, position?: number) {
+  function renderCard(card: QuestionCard, position: number) {
     const key = cardKey(card);
     const isManual = card.questions[0]?.origin === 'manual';
     const draft = drafts[key];
@@ -280,11 +279,9 @@ export default function TeacherRound({ session, credential, view, syncError = ''
         && part.questionRevision === question.questionRevision)));
     return <div className="question-card-content">
       <header className="question-card-heading">
-        <div><h4>{card.opened && card.questionNumber !== undefined ? questionLabel(card) : isManual ? '手動題' : `來源題號 ${card.name}`}</h4>
-          {position !== undefined && <p className="muted">{card.opened ? '已開放' : `清單位置 ${position + 1}`}</p>}</div>
+        <div><h4>{`出題順序 ${position + 1}`}</h4>
+          {(card.opened || isManual) && <p className="muted">{card.opened ? '已開放' : '手動題'}</p>}</div>
         {!card.opened && <div className="row-actions">
-          {position === undefined && <button className="secondary-button" disabled={disabled}
-            onClick={() => void action('/api/question-queue', { unitId: card.id, catalogRevision })}>加入出題清單</button>}
           <button className="quiet question-icon" type="button" aria-label={editing ? '取消編修' : '編修題目'}
             title={editing ? '取消編修' : '編修題目'} disabled={disabled || (running && !editing)} aria-expanded={editing}
             onClick={event => editing ? closeEditor(key) : startEdit(card, event.currentTarget)}>
@@ -350,11 +347,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
       <QuestionQueue items={queue} sortable={sortable} disabled={disabled} catalogRevision={catalogRevision}
         onReorder={worksheetUnitIds => action('/api/question-queue', { worksheetUnitIds, catalogRevision }, 'PUT')}
         renderItem={(id, index) => renderCard(byId.get(id)!, index)}
-        previewLabel={id => byId.get(id)?.questions[0]?.prompt ?? byId.get(id)?.name ?? ''} />
-      {addable.length > 0 && <section className="question-catalog">
-        <h3>學習單題目</h3>
-        <ul className="question-queue">{addable.map(card => <li key={card.id}>{renderCard(card)}</li>)}</ul>
-      </section>}
+        previewLabel={id => byId.get(id)?.questions[0]?.prompt ?? '缺少題幹'} />
       {lostDrafts.length > 0 && <details className="question-editor">
         <summary>已失效的草稿</summary>
         {lostDrafts.flatMap(([, draft]) => draft.questions.map(part => <p key={part.questionKey}>{part.prompt}<br />{part.acceptedAnswersText}</p>))}

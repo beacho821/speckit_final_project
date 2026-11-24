@@ -18,11 +18,11 @@ const view: ActivityView = {
 const show = (current: ActivityView, blocked = false) =>
   render(<TeacherRound session={session} credential="test" view={current} blocked={blocked} />);
 
-it('學習單只能由老師選入，等待同步時無法加入或開題', async () => {
-  await show({ ...view, queueUnitIds: [], nextUnitId: null });
-  expect(host.querySelector('[data-queue-id]')).toBeNull();
-  expect(host.textContent).toContain('清單還沒有題目');
+it('學習單直接顯示在出題清單，等待同步時無法開題', async () => {
   await show(view, true);
+  expect(host.querySelectorAll('[data-queue-id]')).toHaveLength(2);
+  expect(host.textContent).toContain('出題順序 1');
+  expect(host.textContent).not.toMatch(/加入出題清單|來源題號/);
   expect([...host.querySelectorAll('button')].find(b => b.textContent === '開放搶答')?.disabled).toBe(true);
 });
 

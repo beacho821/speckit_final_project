@@ -2,6 +2,43 @@ import { useState } from 'react';
 import type { RosterResponse, SessionResponse } from '../../shared/api';
 import { activityHeaders, requestMessage, requireOk } from './api';
 
+function JoinCode({ code }: { code: string }) {
+  const [status, setStatus] = useState('');
+
+  async function copy(button: HTMLButtonElement) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        // Clipboard API 在校內 HTTP 網址可能無法使用。
+        const field = document.createElement('textarea');
+        field.value = code;
+        field.readOnly = true;
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.append(field);
+        try {
+          field.select();
+          if (!document.execCommand('copy')) throw new Error();
+        } finally {
+          field.remove();
+          button.focus();
+        }
+      }
+      setStatus('已複製');
+    } catch {
+      setStatus('複製失敗，請手動選取加入碼。');
+    }
+  }
+
+  return <div className="join-code-row">
+    <span>學生加入碼</span>
+    <button type="button" className="join-code" aria-label={`複製學生加入碼 ${code}`}
+      title="點擊複製加入碼" onClick={event => void copy(event.currentTarget)}>{code}</button>
+    <span className="muted" role="status">{status}</span>
+  </div>;
+}
+
 export default function Roster({ session, credential, roster, onSave }: {
   session: SessionResponse; credential: string; roster: RosterResponse; onSave: (next: RosterResponse) => void;
 }) {
@@ -37,8 +74,9 @@ export default function Roster({ session, credential, roster, onSave }: {
     <ul className="classroom-rows">{roster.groups.map(group => <li className="roster-entry" key={group.id}>
       <div>
         <h3>{group.name}</h3>
-        <p>學生加入碼：{group.joinCode ? <strong className="join-code">{group.joinCode}</strong> : '目前停用，請管理者確認發碼存檔。'}</p>
-        <p className="muted">曾加入名稱：{group.members.map(member => member.name).join('、') || '尚無學生加入'}</p>
+        {group.joinCode ? <JoinCode key={group.joinCode} code={group.joinCode} />
+          : <p>學生加入碼目前停用，請管理者確認發碼存檔。</p>}
+        <p className="muted">小組成員：{group.members.map(member => member.name).join('、') || '尚無學生加入'}</p>
       </div>
       <div className="row-actions">
         {!roster.locked && <><button className="secondary-button" disabled={busy} onClick={() => setEditing({ id: group.id, name: group.name })}>更名</button>

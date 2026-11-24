@@ -2,6 +2,7 @@ import type { ProjectionView } from '../../shared/api.js';
 import type { Classroom } from './classrooms.js';
 import { currentRound } from './rounds.js';
 import { previewQuestion } from './questions.js';
+import { settlementFor } from './views.js';
 
 export function projectionFor(room: Classroom): ProjectionView {
   const activity = room.activity;
@@ -20,6 +21,7 @@ export function projectionFor(room: Classroom): ProjectionView {
       id: group.id, name: group.name, received: Boolean(visible && round.submissions.some(item => item.groupId === group.id)),
     })),
     ...(winner ? { winnerGroupName: winner.name } : {}),
+    settlement: settlementFor(activity),
     version: activity.viewVersions.projection ?? 0,
   };
 }

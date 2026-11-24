@@ -73,6 +73,7 @@ it('兩間各兩組與兩筆定案在重啟後保留，刪除其中一間後另�
         expect(answer.status).toBe(201);
         await c.finishRound(round.id);
       }
+      expect((await c.request('/settlement/publish', c.teacher, undefined, 'POST')).status).toBe(200);
       return group.joinCode;
     }
     const [oldCode] = await Promise.all([rounds(a), rounds(b)]);
@@ -81,6 +82,7 @@ it('兩間各兩組與兩筆定案在重啟後保留，刪除其中一間後另�
       const room = restored.get(id);
       expect(room.activity.groups.map(group => group.name)).toEqual(['乙組', '甲組']);
       expect(restored.history(room).map(entry => entry.questionNumber)).toEqual([2, 1]);
+      expect(room.activity.settlementPublished).toBe(true);
       for (const round of room.activity.rounds) expect(round.submissions[0]).toMatchObject({ rank: 1, answers: [{ text: '答案', autoCorrect: true }] });
     }
     expect(restored.lookup(oldCode)).toBeUndefined();

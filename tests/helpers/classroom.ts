@@ -35,13 +35,6 @@ export async function classroom(services: AppServices = {}, directory?: Classroo
     }
     const edit = body as Record<string, unknown> | undefined;
     if (edit?.catalogRevision !== undefined) return rawRequest(path, headers, body, method);
-    if (method === 'POST' && path === '/rounds') {
-      const unit = target.units.find(unit => unit.id === edit?.unitId && unit.questions[0]?.origin === 'worksheet');
-      if (unit && !target.queueUnitIds.includes(unit.id)) {
-        const added = await rawRequest('/question-queue', headers, { unitId: unit.id, catalogRevision: target.catalogRevision }, 'POST');
-        if (!added.ok) return added;
-      }
-    }
     if ((method === 'POST' && (path === '/rounds' || path === '/questions' || /^\/rounds\/[^/]+\/start$/.test(path)))
       || (method === 'PATCH' && path.startsWith('/questions/'))) {
       body = { ...(path === '/questions' ? { acceptedAnswersText: '答案' } : {}), ...edit, catalogRevision: target.catalogRevision };

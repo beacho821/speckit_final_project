@@ -3,6 +3,7 @@ import type { ClassroomLocation, ProjectionView } from '../../shared/api';
 import { activityHeaders, basicHeader, readError } from './api';
 import { questionLabel } from './question-label';
 import { phaseLabels } from './ClassroomList';
+import Settlement from './Settlement';
 
 const messageType = 'classroom-projection';
 const readyType = 'classroom-projection-ready';
@@ -288,9 +289,9 @@ function ProjectionPrompt({ kind }: { kind: Exclude<ProjectionState['kind'], 'li
 export function ProjectionDisplay({ view, reconnecting = false }: { view: ProjectionView; reconnecting?: boolean }) {
   return <main className="projection-screen">
     <header className="projection-header"><div><h1>{view.classroomName}</h1></div>
-      <p className="projection-phase" role="status">{phaseLabels[view.phase]}</p></header>
+      <p className="projection-phase" role="status">{view.settlement ? '結算已公布' : phaseLabels[view.phase]}</p></header>
     {reconnecting && <p role="status">重新連線中…</p>}
-    <div className="projection-grid">
+    {view.settlement ? <Settlement settlement={view.settlement} /> : <div className="projection-grid">
       <section className="projection-question">
         {view.questions.length ? <><h2>{view.questions[0].questionNumber === undefined ? view.title ?? '目前題目' : questionLabel({ questionNumber: view.questions[0].questionNumber })}</h2>
           {view.questions.map(question => <p key={question.questionId}>{(question.partNumber != null || (question.questionNumber === undefined && (view.questions.length > 1 || view.title !== question.questionId))) && <><b>{questionLabel(question)}</b>{' '}</>}{question.prompt}</p>)}</>
@@ -298,6 +299,6 @@ export function ProjectionDisplay({ view, reconnecting = false }: { view: Projec
         {view.phase === 'ended' && view.winnerGroupName && <p>勝組：{view.winnerGroupName}</p>}
       </section>
       <aside><h2>收件狀態</h2><ul>{view.groups.map(group => <li key={group.id}><strong>{group.name}</strong><span>{group.received ? '已送出' : '尚未送出'}</span></li>)}</ul></aside>
-    </div>
+    </div>}
   </main>;
 }

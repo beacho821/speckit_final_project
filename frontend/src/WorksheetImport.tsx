@@ -126,7 +126,7 @@ export default function WorksheetImport({
   return <section className="round-panel">
     <h2>匯入學習單</h2>
     {locked ? <p className="muted">已有回合開始，學習單已鎖定。</p> : <>
-      <p className="muted">選擇本機 XLSX，或貼上 Google 試算表網址。匯入後可將所需題目加入出題清單。</p>
+      <p className="muted">選擇本機 XLSX，或貼上 Google 試算表網址。匯入後會將全部題目排入出題清單。</p>
       <div className="role-switch" role="group" aria-label="學習單來源">
         <button aria-pressed={mode === 'google'} disabled={disabled} className={mode === 'google' ? 'active' : ''} onClick={() => switchMode('google')}>Google 試算表</button>
         <button aria-pressed={mode === 'xlsx'} disabled={disabled} className={mode === 'xlsx' ? 'active' : ''} onClick={() => switchMode('xlsx')}>本機 XLSX</button>

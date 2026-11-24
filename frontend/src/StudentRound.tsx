@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ActivityView, SessionResponse } from '../../shared/api';
 import { activityHeaders, readError } from './api';
 import { questionLabel } from './question-label';
+import Settlement from './Settlement';
 
 const waitRejected = '送出時尚未開放，答案草稿已保留。';
 
@@ -85,10 +86,14 @@ export default function StudentRound({ session, credential, view, syncError = ''
     }
   }
   if (!view) return <section className="round-panel"><h2>學生作答</h2><p className="muted">{syncError || '正在連線並取得課堂狀態…'}</p></section>;
-  const title = view.received ? '本組已鎖定送出' : {
+  if (view.settlement) return <div className="student-round">
+    {syncError && <p className="error" role="status">{syncError}</p>}
+    <Settlement settlement={view.settlement} ownGroupId={session.groupId} />
+  </div>;
+  const title = view.received ? (view.phase === 'ended' ? '本組作答結果' : '本組已鎖定送出') : {
     active: '請完成本回合答案',
     reviewing: '已停止收件，等待老師公布結果',
-    ended: '已停止收件，老師已公布結果',
+    ended: '本組未作答',
     preparing: '等待老師準備題目',
     idle: '等待老師準備題目',
   }[view.phase];
@@ -103,7 +108,14 @@ export default function StudentRound({ session, credential, view, syncError = ''
         <button className="primary" disabled={busy || pending !== undefined || remainingMs > 0} onClick={() => void submit()}>{busy ? '送出中…' : pending !== undefined ? '等待收件確認…' : '送出本組答案'}</button></>}
       {(view.received || view.phase === 'reviewing') && view.unit.questions?.map(question =>
         <p className="question-prompt" key={question.questionId}><b>{questionLabel(question)}</b> {question.prompt}</p>)}
-      {view.received && <div className="success-box">本組答案已收件。{view.phase !== 'ended' && '請等待老師公布結果。'}{view.ownAnswers?.map(answer => <p key={answer.questionId}>{labelFor(answer.questionId)}：{answer.text}</p>)}</div>}
+      {view.received && <div className="answer-feedback" aria-live="polite">
+        {view.phase !== 'ended' && <p className="muted">本組答案已收件，請等待老師公布結果。</p>}
+        {view.ownAnswers?.map(answer => <div key={answer.questionId}
+          className={answer.correct === true ? 'answer-feedback-correct' : answer.correct === false ? 'answer-feedback-incorrect' : undefined}>
+          {answer.correct !== undefined && <strong>{answer.correct ? '正確' : '錯誤'}</strong>}
+          <p>{labelFor(answer.questionId)}：{answer.text}</p>
+        </div>)}
+      </div>}
     </>}
   </section>;
 }

@@ -29,20 +29,6 @@ function queueView(activity: Activity) {
   return { queueUnitIds: activity.queueUnitIds, catalogRevision: activity.catalogRevision };
 }
 
-export function addToQueue(activity: Activity, input: { unitId?: unknown; catalogRevision?: unknown }) {
-  requireCatalogRevision(activity, input.catalogRevision);
-  const unit = activity.units.find(unit => unit.id === input.unitId && unit.questions[0]?.origin === 'worksheet');
-  if (!unit) throw new DomainError(404, 'UNIT_NOT_FOUND', '找不到所選學習單題目，請重新整理。');
-  if (openedUnits(activity).has(unit.id)) throw new DomainError(409, 'UNIT_ALREADY_USED', '此題已開放，請選擇其他題目。');
-  if (!activity.queueUnitIds.includes(unit.id)) {
-    const manual = new Set(activity.units.filter(unit => unit.questions[0]?.origin === 'manual').map(unit => unit.id));
-    const firstManual = activity.queueUnitIds.findIndex(id => manual.has(id));
-    activity.queueUnitIds.splice(firstManual < 0 ? activity.queueUnitIds.length : firstManual, 0, unit.id);
-    catalogChanged(activity);
-  }
-  return queueView(activity);
-}
-
 export function reorderQueue(activity: Activity, input: { worksheetUnitIds?: unknown; catalogRevision?: unknown }) {
   requireCatalogRevision(activity, input.catalogRevision);
   const opened = openedUnits(activity);

@@ -16,6 +16,7 @@ export interface Classroom {
 }
 
 const memoryStorage: ClassroomStorage = { async save() {}, async remove() {} };
+const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const storageError = () => new DomainError(503, 'CLASSROOM_SAVE_FAILED', '教室存檔未完成，請確認存檔權限後再試。');
 export const expiredActivity = () => new DomainError(409, 'ACTIVITY_EXPIRED', '活動已更新或教室已移除，請重新進入教室。');
 
@@ -23,7 +24,7 @@ function storedActivity(activity: Activity, startedAt: number): StoredActivity {
   return {
     id: activity.id, startedAt, groups: activity.groups, members: [...activity.members.values()],
     worksheet: activity.worksheet, units: activity.units, queueUnitIds: activity.queueUnitIds, rosterLocked: activity.rosterLocked,
-    rosterVersion: activity.rosterVersion,
+    rosterVersion: activity.rosterVersion, settlementPublished: activity.settlementPublished,
     rounds: activity.rounds.map(round => {
       const { openedAt: _time, ...data } = round;
       return { ...data, openAtByGroup: {}, submissions: round.submissions.map(submission => ({
@@ -67,9 +68,9 @@ export class Classrooms {
         }
       }
       const manual = current.units.filter(unit => unit.questions[0]?.origin === 'manual').map(unit => unit.id);
-      const usedWorksheets = new Set(current.rounds.map(round => round.unitId).filter(id =>
-        current.units.some(unit => unit.id === id && unit.questions[0]?.origin === 'worksheet')));
-      const queueUnitIds = current.queueUnitIds ?? [...usedWorksheets, ...manual];
+      const worksheetIds = new Set(current.units.filter(unit => unit.questions[0]?.origin === 'worksheet').map(unit => unit.id));
+      const queued = current.queueUnitIds ?? current.rounds.map(round => round.unitId);
+      const queueUnitIds = [...new Set([...queued.filter(id => worksheetIds.has(id)), ...worksheetIds]), ...manual];
       const activity = { ...createActivity(), ...current, queueUnitIds, members: new Map(current.members.map(member => [member.id, member])) };
       const room = {
         id: record.id, name: record.name, createdAt: record.createdAt, updatedAt: record.updatedAt,
@@ -89,10 +90,12 @@ export class Classrooms {
     return directory;
   }
 
-  issue(randomPart = () => Array.from({ length: 10 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[randomInt(32)]).join('')) {
+  issue(randomPart = () => Array.from({ length: 10 }, () => codeAlphabet[randomInt(codeAlphabet.length)]).join('')) {
     if (this.epoch === null) throw new DomainError(503, 'CODE_UNAVAILABLE', '加入碼暫停使用，請管理者確認發碼世代存檔。');
+    // 固定長度的隨機前段接上同字母表編碼的發碼世代，跨重啟仍不重複。
+    const generation = Array.from(BigInt(this.epoch).toString(32), digit => codeAlphabet[parseInt(digit, 32)]).join('');
     for (let attempt = 0; attempt < 100; attempt++) {
-      const code = this.epoch + '-' + randomPart();
+      const code = randomPart() + generation;
       if (code !== this.teacherPassword.trim() && !this.issued.has(code)) {
         this.issued.add(code);
         return code;
@@ -107,7 +110,6 @@ export class Classrooms {
 
   lookup(code: string) {
     if (this.epoch === null) throw new DomainError(503, 'CODE_UNAVAILABLE', '加入碼暫停使用，請管理者確認發碼世代存檔。');
-    if (!code.startsWith(this.epoch + '-')) return undefined;
     return this.codeIndex.get(code);
   }
 

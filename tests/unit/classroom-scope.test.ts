@@ -18,8 +18,8 @@ it('隔離各教室並於同室寫入失敗時保留已提交狀態', async () =
   expect(classrooms.issue()).not.toBe(classrooms.issue());
 });
 
-it('學生發碼均避開教師密碼及已用碼，跨世代可重用相同隨機尾碼', async () => {
-  const password = ' 1-PASSWORD ';
+it('學生加入碼沒有分隔符，避開教師密碼、已用碼及跨世代碰撞', async () => {
+  const password = ' PASSWORDB ';
   const classrooms = new Classrooms(undefined, password, '1');
   const room = await classrooms.create('測試教室');
   const parts = ['PASSWORD', 'GROUPONE', 'PASSWORD', 'GROUPONE', 'GROUPTWO'];
@@ -28,11 +28,11 @@ it('學生發碼均避開教師密碼及已用碼，跨世代可重用相同隨�
 
   await classrooms.mutate(room, room.activity, draft => addGroup(draft, '甲組', password, undefined, () => classrooms.issue()));
   const [{ id }] = room.activity.groups;
-  expect(room.activity.joinCodes.get(id)).toBe('1-GROUPONE');
+  expect(room.activity.joinCodes.get(id)).toBe('GROUPONEB');
   await classrooms.mutate(room, room.activity, draft => addGroup(draft, '乙組', password, undefined, () => classrooms.issue()));
   const other = room.activity.groups[1];
-  expect(classrooms.lookup('1-GROUPTWO')?.groupId).toBe(other.id);
-  expect(classrooms.lookup('1-GROUPONE')?.groupId).toBe(id);
+  expect(classrooms.lookup('GROUPTWOB')?.groupId).toBe(other.id);
+  expect(classrooms.lookup('GROUPONEB')?.groupId).toBe(id);
   expect(parts).toEqual([]);
-  expect(new Classrooms(undefined, password, '2').issue(() => 'GROUPONE')).toBe('2-GROUPONE');
+  expect(new Classrooms(undefined, password, '2').issue(() => 'GROUPONE')).toBe('GROUPONEC');
 });

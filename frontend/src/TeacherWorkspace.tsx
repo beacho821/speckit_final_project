@@ -69,11 +69,13 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
   const [pendingImportRefresh, setPendingImportRefresh] = useState<number>();
   const [starting, setStarting] = useState(false);
   const [settlement, setSettlement] = useState(false);
+  const [publishingSettlement, setPublishingSettlement] = useState(false);
   const [scopeStatus, setScopeStatus] = useState<'ready' | 'checking' | 'stale'>('ready');
   const [scopeRefresh, setScopeRefresh] = useState<number>();
   const refreshForLocation = useRef<() => number>(() => 0);
   const locationRequest = useRef<AbortController | null>(null);
   const startRequest = useRef<AbortController | null>(null);
+  const settlementRequest = useRef<AbortController | null>(null);
   const settlementButton = useRef<HTMLButtonElement>(null);
   const settlementHeading = useRef<HTMLHeadingElement>(null);
   const changeDialog = useRef<HTMLDialogElement>(null);
@@ -120,7 +122,11 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
   }, [logout, reloadLocation]);
   const writeback = useTeacherWriteback(session, credential, expire);
   const { view, error: syncError, refresh, fullSnapshot, completedRefresh } = useActivityView(session, credential, expire);
-  useEffect(() => () => { locationRequest.current?.abort(); startRequest.current?.abort(); }, []);
+  useEffect(() => () => {
+    locationRequest.current?.abort();
+    startRequest.current?.abort();
+    settlementRequest.current?.abort();
+  }, []);
   useEffect(() => { refreshForLocation.current = refresh; }, [refresh]);
   const scopeUnconfirmed = scopeStatus !== 'ready' || (scopeRefresh !== undefined && completedRefresh < scopeRefresh);
   const waitingImport = pendingImportRefresh !== undefined && completedRefresh < pendingImportRefresh;
@@ -184,10 +190,42 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
   const roundRestriction = phase === 'active' ? '請先到控制台結束搶答，再審核並定案。'
     : phase === 'reviewing' ? '請先到控制台完成審核與定案。' : '';
   const settlementRestriction = roundRestriction || (!view || syncError || scopeUnconfirmed ? '請等待確認目前活動。' : '');
+  const canPublishSettlement = !settlementRestriction && Boolean(view?.closedRoundIds.length)
+    && !view?.settlement && !starting && !publishingSettlement;
   const visibleSettlement = area === 'console' && settlement && !roundRestriction;
   const startRestriction = settlementRestriction || (serverWriteback || writeback.pending ? '回填進行中，請稍後再試。' : '')
     || (importBusy || waitingImport ? '請等待題目資料同步完成。' : '');
-  const canStartNew = visibleSettlement && !startRestriction && !starting;
+  const canStartNew = visibleSettlement && !startRestriction && !starting && !publishingSettlement;
+
+  async function publishSettlement() {
+    if (!canPublishSettlement || settlementRequest.current) return;
+    const controller = new AbortController();
+    settlementRequest.current = controller;
+    setPublishingSettlement(true);
+    setError('');
+    try {
+      const response = await fetch('/api/settlement/publish', {
+        method: 'POST', headers: activityHeaders(session, credential), signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      if (!response.ok) {
+        const issue = await readError(response);
+        if (controller.signal.aborted) return;
+        if (response.status === 401 || response.status === 403) { expire('authorization'); return; }
+        if (issue.code === 'ACTIVITY_EXPIRED') { expire('activity'); return; }
+        setError(issue.message);
+      }
+      refresh();
+    } catch {
+      if (!controller.signal.aborted) {
+        setError('公布結果待確認，正在同步活動狀態。');
+        refresh();
+      }
+    } finally {
+      settlementRequest.current = null;
+      if (!controller.signal.aborted) setPublishingSettlement(false);
+    }
+  }
 
   useEffect(() => {
     if (area === 'console' && !roundRestriction) return;
@@ -248,6 +286,12 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
       <div className="section-heading">
         <h2 ref={settlementHeading} tabIndex={-1}>結算</h2>
         <button className="quiet" onClick={leaveSettlement}>返回主持</button>
+      </div>
+      <div className="activity-actions">
+        <button className="secondary-button" disabled={!canPublishSettlement}
+          onClick={() => void publishSettlement()}>{view?.settlement ? '已公布結算' : publishingSettlement ? '公布中…' : '公布結算'}</button>
+        <p className="muted" role="status">{view?.settlement ? '已同步至教室投影與學生端。'
+          : !view?.closedRoundIds.length ? '至少定案一個回合後即可公布結算。' : '公布後，教室投影與學生端會顯示各組勝場。'}</p>
       </div>
       <TeacherResults {...{ session, credential }} source={view?.worksheetPreview?.source}
         hasResults={Boolean(view?.closedRoundIds.length)}

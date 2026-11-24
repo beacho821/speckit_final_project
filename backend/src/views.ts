@@ -1,9 +1,22 @@
 import type { Activity } from './activity.js';
-import type { ActivityView, Round, RoundResultLine, StudentRoundResultLine, WorksheetPreview } from '../../shared/api.js';
+import type { ActivitySettlement, ActivityView, Round, RoundResultLine, StudentRoundResultLine, WorksheetPreview } from '../../shared/api.js';
 import { currentRound, finalCorrectness, remainingWait, reviewFor, roundNumbering } from './rounds.js';
 import type { Identity } from './access.js';
 import { nextUnitId } from './question-queue.js';
 import { previewQuestion } from './questions.js';
+
+export function settlementFor(activity: Activity): ActivitySettlement | undefined {
+  if (!activity.settlementPublished) return undefined;
+  let roundCount = 0;
+  const wins = new Map<string, number>();
+  for (const round of activity.rounds) {
+    if (round.phase !== 'ended') continue;
+    roundCount++;
+    if (round.winnerGroupId) wins.set(round.winnerGroupId, (wins.get(round.winnerGroupId) ?? 0) + 1);
+  }
+  return { roundCount, groups: activity.groups.map(group => ({ ...group, wins: wins.get(group.id) ?? 0 }))
+    .sort((a, b) => b.wins - a.wins) };
+}
 
 export function makeView(activity: Activity, identity: Identity, now = performance.now(), retainReceipt = false): ActivityView {
   const round = currentRound(activity) ?? (retainReceipt && identity.role === 'student' ? activity.rounds.at(-1) : undefined);
@@ -24,6 +37,7 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     } : null,
     closedRoundIds: activity.rounds.filter(item => item.phase === 'ended').map(item => item.id),
     version: activity.viewVersions[key] ?? 0,
+    settlement: settlementFor(activity),
   };
   if (identity.role === 'teacher') {
     if (activity.writebackInProgress) common.writebackInProgress = true;
@@ -55,7 +69,10 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     common.groupId = groupId;
     common.groupName = activity.groups.find(g => g.id === groupId)?.name;
     common.received = Boolean(own);
-    common.ownAnswers = own?.answers.map(answer => ({ questionId: answer.questionId, text: answer.text }));
+    common.ownAnswers = own?.answers.map(answer => ({
+      questionId: answer.questionId, text: answer.text,
+      ...(round?.phase === 'ended' ? { correct: finalCorrectness(answer) } : {}),
+    }));
     common.waitRemainingMs = round?.phase === 'active' ? remainingWait(round, groupId, now) : 0;
   }
   return common;

@@ -12,6 +12,7 @@ export interface Activity {
   worksheet: Worksheet | null;
   units: CatalogUnit[];
   rounds: Round[];
+  settlementPublished?: boolean;
   queueUnitIds: string[];
   catalogRevision: number;
   version: number;

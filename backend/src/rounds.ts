@@ -64,6 +64,7 @@ export function startRound(activity: Activity, roundId: string, now = performanc
   round.sequenceNumber = activity.rounds.filter(entry => entry.phase !== 'preparing').length + 1;
   round.isMultipart = multipart(round.questions, activity.worksheet);
   round.phase = 'active'; round.openedAt = now; round.roster = [...activity.groups];
+  activity.settlementPublished = false;
   round.openAtByGroup = openTimes(activity, round, now);
   if (!activity.rosterLocked) activity.rosterVersion++;
   activity.rosterLocked = true;
@@ -229,6 +230,22 @@ export function publishRound(activity: Activity, roundId: string, revision: unkn
   changed(activity);
   projectionChanged(activity);
   return { id: round.id, phase: round.phase, winnerGroupId: round.winnerGroupId ?? null };
+}
+
+export function publishSettlement(activity: Activity) {
+  const current = currentRound(activity);
+  if (current && current.phase !== 'preparing') {
+    throw new DomainError(409, 'ROUND_ACTIVE', '請先定案目前回合，再公布結算。');
+  }
+  if (!activity.rounds.some(round => round.phase === 'ended')) {
+    throw new DomainError(409, 'NO_ENDED_ROUNDS', '請先公布至少一個回合的結果。');
+  }
+  if (!activity.settlementPublished) {
+    activity.settlementPublished = true;
+    changed(activity);
+    projectionChanged(activity);
+  }
+  return { published: true };
 }
 
 export function remainingWait(round: Round, groupId: string, now = performance.now()): number {

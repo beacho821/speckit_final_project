@@ -5,13 +5,13 @@ import type { AppConfig } from './config.js';
 import type { Activity } from './activity.js';
 import { activityLocation, credential, requireTeacher, scopedAccess, teacherOnly, type ActivityAccess } from './access.js';
 import { Classrooms, expiredActivity } from './classrooms.js';
-import { DomainError, endRound, prepareRound, publishRound, startRound, submitAnswers, updateReview } from './rounds.js';
+import { DomainError, endRound, prepareRound, publishRound, publishSettlement, startRound, submitAnswers, updateReview } from './rounds.js';
 import { makeView, previewFor, resultsFor, studentResultsFor } from './views.js';
 import { projectionFor } from './projection.js';
 import { importGoogleWorksheet, type ImportResult } from './worksheet/google-source.js';
 import { buildResultsCsv } from './results-csv.js';
 import { writebackToGoogle } from './worksheet/writeback.js';
-import { addToQueue, deleteQuestionUnit, reorderQueue, requireCatalogRevision, requireNextUnit } from './question-queue.js';
+import { deleteQuestionUnit, reorderQueue, requireCatalogRevision, requireNextUnit } from './question-queue.js';
 import { addManualQuestion, updateQuestion, updateQuestionCard } from './questions.js';
 import { beginImport, publishImportedWorksheet } from './worksheet/import.js';
 import { importXlsxWorksheet, XLSX_LIMIT } from './worksheet/xlsx-source.js';
@@ -213,7 +213,6 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
   }));
   app.delete('/api/questions/units/:unitId', ...teacherAuth, mutate((draft, req) =>
     deleteQuestionUnit(draft, String(req.params.unitId), req.body?.catalogRevision)));
-  app.post('/api/question-queue', ...teacherAuth, mutate((draft, req) => addToQueue(draft, req.body ?? {})));
   app.put('/api/question-queue', ...teacherAuth, mutate((draft, req) => reorderQueue(draft, req.body ?? {})));
   app.post('/api/rounds/open-next', ...teacherAuth, mutate((draft, req) => {
     const unitId = req.body?.unitId;
@@ -235,6 +234,7 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
   app.post('/api/rounds/:id/end', ...teacherAuth, mutate((draft, req) => endRound(draft, String(req.params.id))));
   app.patch('/api/rounds/:id/review', ...teacherAuth, mutate((draft, req) => updateReview(draft, String(req.params.id), req.body)));
   app.post('/api/rounds/:id/publish', ...teacherAuth, mutate((draft, req) => publishRound(draft, String(req.params.id), req.body?.reviewRevision)));
+  app.post('/api/settlement/publish', ...teacherAuth, mutate(publishSettlement));
   app.post('/api/rounds/:id/submissions', scoped, mutate((draft, req) => {
     const identity = req.activityAccess!.identity;
     if (identity.role !== 'student') throw new DomainError(403, 'FORBIDDEN', '此操作僅限學生組別使用。');
