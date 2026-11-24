@@ -268,7 +268,8 @@ export function createApp(config: AppConfig, services: AppServices = {}, classro
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="classroom-results.csv"');
-    res.send(csv);
+    // 讓 Excel 直接開啟 CSV 時辨識 UTF-8。
+    res.send('\uFEFF' + csv);
   }));
   app.post('/api/worksheet/writeback', ...teacherAuth, handle(async (req, res) => {
     const { room, activity } = req.activityAccess!;

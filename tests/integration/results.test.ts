@@ -93,7 +93,9 @@ describe('結果與回填端點整合', () => {
       const response = await c.request('/results.csv');
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toContain('text/csv; charset=utf-8');
-      const csv = await response.text();
+      const bytes = new Uint8Array(await (await response.blob()).arrayBuffer());
+      expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+      const csv = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const rows = csv.trim().split(/\r?\n/);
       expect(rows).toHaveLength(21);
       expect(rows[0]).toBe('題號,組別,答案,搶答順位,作答狀態,正誤');
