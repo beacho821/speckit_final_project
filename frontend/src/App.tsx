@@ -8,6 +8,18 @@ import { ProjectionEntry, useOpenProjection } from './Projection';
 import { ApiRequestError, basicHeader, readError, requestMessage } from './api';
 import { readStudent, saveStudent, clearStudent, type SavedStudent } from './session';
 import { useActivityView } from './useActivityView';
+import Standings from './Standings';
+
+const studentPages = {
+  '/student': '作答',
+  '/student/standings': '即時排名',
+  '/student/history': '歷史紀錄',
+} as const;
+type StudentPage = keyof typeof studentPages;
+
+function studentPageFor(path: string): StudentPage {
+  return path === '/student/standings' || path === '/student/history' ? path : '/student';
+}
 
 export default function App() {
   const path = window.location.pathname;
@@ -39,8 +51,8 @@ function ClassroomApp() {
   }, []);
 
   useEffect(() => {
-    if (path === '/student' || path === '/student/history') studentPageHeading.current?.focus();
-  }, [path]);
+    if (session?.role === 'student') studentPageHeading.current?.focus();
+  }, [path, session?.role]);
 
   const logout = useCallback(() => {
     operation.current++;
@@ -87,7 +99,7 @@ function ClassroomApp() {
       const body = await response.json();
       if (id !== operation.current) return;
       setRole(selected); setCredential(secret); setSession(body); setRestoring(false);
-      navigate(selected === 'teacher' ? '/teacher/classrooms' : prior && window.location.pathname === '/student/history' ? '/student/history' : '/student');
+      navigate(selected === 'teacher' ? '/teacher/classrooms' : prior ? studentPageFor(window.location.pathname) : '/student');
       if (selected === 'student' && !saveStudent(body, secret)) {
         setNotice('此分頁無法暫存身分，重新整理後請再輸入加入碼與名稱。');
       }
@@ -136,26 +148,35 @@ function ClassroomApp() {
   </main>;
 
   if (session.role === 'teacher') return <TeacherPortal {...{ credential, path, navigate, logout, openProjection }} />;
-  const historyPage = path === '/student/history';
+  const studentPage = studentPageFor(path);
+  const pageLabel = (page: StudentPage) => page === '/student' && view?.settlement ? '活動結算' : studentPages[page];
+  const standings = view?.standings ?? view?.settlement?.groups ?? [];
+  const ownStanding = standings.find(group => group.id === session.groupId);
   return <main className="student-shell">
     <header className="student-bar">
       <div><h1>{session.classroomName ?? '學生工作台'}</h1><p>{view?.groupName ?? session.groupName} · {session.studentName}</p></div>
       <button className="quiet" onClick={logout}>登出</button>
     </header>
     <nav className="classroom-nav student-nav" aria-label="學生工作區">
-      <a href="/student" aria-current={!historyPage ? 'page' : undefined} onClick={event => {
-        event.preventDefault(); navigate('/student');
-      }}>{view?.settlement ? '活動結算' : '作答'}</a>
-      <a href="/student/history" aria-current={historyPage ? 'page' : undefined} onClick={event => {
-        event.preventDefault(); navigate('/student/history');
-      }}>歷史紀錄</a>
+      {(Object.keys(studentPages) as StudentPage[]).map(page => <a key={page} href={page}
+        aria-current={studentPage === page ? 'page' : undefined} onClick={event => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault(); navigate(page);
+        }}>{pageLabel(page)}</a>)}
     </nav>
-    <h2 className="sr-only" tabIndex={-1} ref={studentPageHeading}>{historyPage ? '歷史紀錄' : '作答'}</h2>
+    {studentPage !== '/student/standings' && <h2 className="sr-only" tabIndex={-1} ref={studentPageHeading}>{pageLabel(studentPage)}</h2>}
     {notice && <p role="status">{notice}</p>}{error && <p className="error" role="alert">{error}</p>}
-    <div hidden={historyPage} key={session.activityId}>
+    <div hidden={studentPage !== '/student'} key={session.activityId}>
       <StudentRound {...{ session, credential, view, syncError, refresh, fullSnapshot }} onExpired={logout} />
     </div>
-    {historyPage && (view ? <StudentHistory {...{ session, credential }} roundIds={view.closedRoundIds}
+    {studentPage === '/student/standings' && <section className="round-panel student-round student-standings" aria-labelledby="student-standings-title">
+      <h2 id="student-standings-title" tabIndex={-1} ref={studentPageHeading}>即時排名</h2>
+      {syncError && <p className="error" role="status">{syncError}</p>}
+      {ownStanding && <p className="muted" aria-live="polite">本組第 {ownStanding.rank} 名 · {ownStanding.points} 分</p>}
+      {standings.length > 0 ? <Standings groups={standings} ownGroupId={session.groupId} />
+        : view ? <p className="muted">目前沒有排名。</p> : !syncError && <p role="status">正在載入排名…</p>}
+    </section>}
+    {studentPage === '/student/history' && (view ? <StudentHistory {...{ session, credential }} roundIds={view.closedRoundIds}
       snapshot={fullSnapshot} onExpired={logout} /> : <p role="status">{syncError || '正在取得歷史紀錄…'}</p>)}
   </main>;
 }

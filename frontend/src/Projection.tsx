@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ClassroomLocation, ProjectionView } from '../../shared/api';
+import type { ClassroomLocation, GroupStanding, ProjectionView } from '../../shared/api';
 import { activityHeaders, basicHeader, readError } from './api';
 import { questionLabel } from './question-label';
 import { phaseLabels } from './ClassroomList';
 import Settlement from './Settlement';
+import Standings from './Standings';
 
 const messageType = 'classroom-projection';
 const readyType = 'classroom-projection-ready';
@@ -23,6 +24,12 @@ class ProjectionError extends Error {
   constructor(readonly kind: TerminalState | 'scope') { super(kind); }
 }
 
+function isStandings(value: unknown): value is GroupStanding[] {
+  return Array.isArray(value) && value.every(group => group && typeof group.id === 'string'
+    && typeof group.name === 'string' && Number.isSafeInteger(group.rank) && group.rank > 0
+    && Number.isSafeInteger(group.points) && group.points >= 0);
+}
+
 function isProjectionView(value: unknown): value is ProjectionView {
   if (!value || typeof value !== 'object') return false;
   const view = value as ProjectionView;
@@ -30,6 +37,9 @@ function isProjectionView(value: unknown): value is ProjectionView {
     && Object.hasOwn(phaseLabels, view.phase)
     && Array.isArray(view.groups) && view.groups.every(group => group && typeof group.id === 'string'
       && typeof group.name === 'string' && typeof group.received === 'boolean')
+    && (view.standings === undefined || isStandings(view.standings))
+    && (view.settlement === undefined || (view.settlement && Number.isSafeInteger(view.settlement.roundCount)
+      && isStandings(view.settlement.groups)))
     && Array.isArray(view.questions) && view.questions.every(question => question
       && typeof question.questionId === 'string' && (question.prompt === null || typeof question.prompt === 'string'));
 }
@@ -298,7 +308,13 @@ export function ProjectionDisplay({ view, reconnecting = false }: { view: Projec
           : <h2>等待老師開放搶答</h2>}
         {view.phase === 'ended' && view.winnerGroupName && <p>勝組：{view.winnerGroupName}</p>}
       </section>
-      <aside><h2>收件狀態</h2><ul>{view.groups.map(group => <li key={group.id}><strong>{group.name}</strong><span>{group.received ? '已送出' : '尚未送出'}</span></li>)}</ul></aside>
+      {view.standings ? <aside aria-labelledby="projection-standings-title">
+        <h2 id="projection-standings-title">即時排名</h2>
+        {view.standings.length ? <Standings groups={view.standings}
+          receivedByGroup={view.phase === 'active' || view.phase === 'reviewing'
+            ? new Set(view.groups.filter(group => group.received).map(group => group.id)) : undefined} />
+          : <p className="projection-phase">尚無組別</p>}
+      </aside> : <aside><h2>收件狀態</h2><ul>{view.groups.map(group => <li key={group.id}><strong>{group.name}</strong><span>{group.received ? '已送出' : '尚未送出'}</span></li>)}</ul></aside>}
     </div>}
   </main>;
 }

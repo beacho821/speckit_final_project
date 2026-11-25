@@ -60,24 +60,40 @@ it('同一清單版本並行開題只成功一次，學生歷史各自顯示本�
       expect(submitted.status).toBe(201);
     }
     const studentView = async (index: number) => (await c.rawRequest('/view', students[index].headers)).json();
-    expect((await studentView(0)).ownAnswers).toEqual([{ questionId: question.questionId, text: '標準答案' }]);
+    const collecting = await studentView(0);
+    expect(collecting.ownAnswers).toEqual([{ questionId: question.questionId, text: '標準答案' }]);
+    expect(collecting.standings.every((group: { points: number }) => group.points === 0)).toBe(true);
     const publish = () => c.rawRequest('/settlement/publish', c.teacher, undefined, 'POST');
     expect((await publish()).status).toBe(409);
-    await c.finishRound(round.id);
-    expect((await studentView(0)).ownAnswers[0].correct).toBe(true);
-    expect((await studentView(1)).ownAnswers[0].correct).toBe(false);
+    const projection = '/classrooms/' + c.room.id + '/projection';
+    expect((await c.request('/rounds/' + round.id + '/end', c.teacher, undefined, 'POST')).status).toBe(200);
+    const reviewing = await studentView(2);
+    expect((await studentView(1)).ownAnswers).toEqual([{ questionId: question.questionId, text: '乙組私有作答' }]);
+    const reviewingProjection = await (await c.request(projection)).json();
+    const rankingUpdate = c.rawRequest('/view?after=' + reviewing.version, students[2].headers);
+    const projectionUpdate = c.request(projection + '?after=' + reviewingProjection.version);
+    await c.publishReviewedRound(round.id);
+    const [rankedStudent, rankedProjection] = await Promise.all([
+      rankingUpdate.then(response => response.json()),
+      projectionUpdate.then(response => response.json()),
+    ]);
+    expect((await studentView(0)).ownAnswers[0]).toEqual({ questionId: question.questionId, text: '標準答案', correct: true });
+    expect((await studentView(1)).ownAnswers[0]).toEqual({
+      questionId: question.questionId, text: '乙組私有作答', correct: false, publishedAnswer: '標準答案',
+    });
     expect((await studentView(0)).settlement).toBeUndefined();
     expect((await c.rawRequest('/settlement/publish', students[0].headers, undefined, 'POST')).status).toBe(403);
-    const projection = '/classrooms/' + c.room.id + '/projection';
     const before = await (await c.request(projection)).json();
     expect(before.settlement).toBeUndefined();
+    const summary = { roundCount: 1, groups: [
+      { id: first.id, name: first.name, points: 3, rank: 1 },
+      { id: second.id, name: second.name, points: 0, rank: 2 },
+      { id: third.id, name: third.name, points: 0, rank: 2 },
+    ] };
+    expect(rankedStudent.standings).toEqual(summary.groups);
+    expect(rankedProjection.standings).toEqual(summary.groups);
     const waiting = c.request(projection + '?after=' + before.version);
     expect((await publish()).status).toBe(200);
-    const summary = { roundCount: 1, groups: [
-      { id: first.id, name: first.name, wins: 1 },
-      { id: second.id, name: second.name, wins: 0 },
-      { id: third.id, name: third.name, wins: 0 },
-    ] };
     expect((await (await waiting).json()).settlement).toEqual(summary);
     expect((await studentView(2)).settlement).toEqual(summary);
     const a = await (await c.rawRequest(results, students[0].headers)).json();
@@ -90,7 +106,9 @@ it('同一清單版本並行開題只成功一次，學生歷史各自顯示本�
     const next = await (await c.request('/questions', c.teacher, { prompt: '下一題' }, 'POST')).json();
     const prepared = await (await c.request('/rounds', c.teacher, { unitId: next.unitId }, 'POST')).json();
     expect((await c.startConfiguredRound(prepared.id)).status).toBe(200);
-    expect((await studentView(0)).settlement).toBeUndefined();
+    const nextView = await studentView(0);
+    expect(nextView.settlement).toBeUndefined();
+    expect(nextView.standings).toEqual(summary.groups);
   } finally { await c.close(); }
 });
 

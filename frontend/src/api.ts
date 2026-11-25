@@ -1,4 +1,4 @@
-import type { SessionResponse } from '../../shared/api';
+import type { SessionResponse, StudentRoundResultLine } from '../../shared/api';
 
 export function basicHeader(role: string, credential: string) {
   const bytes = new TextEncoder().encode(`${role}:${credential}`);
@@ -33,4 +33,22 @@ export async function readList<T>(response: Response): Promise<T[]> {
   const data: unknown = await response.json();
   if (!Array.isArray(data)) throw new Error();
   return data;
+}
+
+export async function fetchStudentRoundResults(
+  roundId: string, headers: HeadersInit, signal: AbortSignal, onExpired?: () => void,
+): Promise<StudentRoundResultLine[]> {
+  const response = await fetch(`/api/rounds/${encodeURIComponent(roundId)}/results`, { headers, signal });
+  if (!response.ok) {
+    const issue = await readError(response);
+    if (!signal.aborted && (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED')) onExpired?.();
+    if (response.status >= 500 && !issue.code) throw new Error();
+    throw new ApiRequestError(issue.message);
+  }
+  const rows = await readList<StudentRoundResultLine>(response);
+  if (rows.some(row => !row || !Number.isSafeInteger(row.questionNumber)
+    || (row.partNumber !== null && !Number.isSafeInteger(row.partNumber))
+    || ![row.prompt, row.ownAnswer, row.publishedAnswer].every(text => text === null || typeof text === 'string')
+    || (row.correct !== null && typeof row.correct !== 'boolean'))) throw new Error();
+  return rows;
 }

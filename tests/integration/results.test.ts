@@ -12,6 +12,8 @@ it('舊回合的人工補答與自動補答一同封存，角色結果與 CSV �
     const unit = c.activity.units[0];
     const round = await (await c.request('/rounds', c.teacher, { unitId: unit.id }, 'POST')).json();
     await c.startConfiguredRound(round.id, id => '標準 ' + id);
+    const answers = unit.questions.map(question => ({ questionId: question.questionId, text: '錯誤作答' }));
+    expect((await c.request('/rounds/' + round.id + '/submissions', student.headers, { answers }, 'POST')).status).toBe(201);
     await c.request('/rounds/' + round.id + '/end', c.teacher, undefined, 'POST');
     const [first, second] = unit.questions.map(question => question.questionId);
     const legacy = '  原有補答,含"引號"\n下一行  ';
@@ -26,6 +28,11 @@ it('舊回合的人工補答與自動補答一同封存，角色結果與 CSV �
     const learner = await (await c.request('/rounds/' + round.id + '/results', student.headers)).json();
     expect(teacher.map((row: { teacherAnswer: string }) => row.teacherAnswer)).toEqual([legacy, '標準 ' + second]);
     expect(learner.map((row: { publishedAnswer: string }) => row.publishedAnswer)).toEqual([legacy, '標準 ' + second]);
+    const studentView = await (await c.request('/view', student.headers)).json();
+    expect(studentView.ownAnswers).toEqual([
+      { ...answers[0], correct: false, publishedAnswer: legacy },
+      { ...answers[1], correct: false, publishedAnswer: '標準 ' + second },
+    ]);
     const csv = await (await c.request('/results.csv')).text();
     expect(csv).toContain('"  原有補答,含""引號""\n下一行  "');
     expect(csv).toContain('標準 ' + second);

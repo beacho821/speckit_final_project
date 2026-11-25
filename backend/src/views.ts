@@ -1,22 +1,10 @@
 import type { Activity } from './activity.js';
-import type { ActivitySettlement, ActivityView, Round, RoundResultLine, StudentRoundResultLine, WorksheetPreview } from '../../shared/api.js';
+import type { ActivityView, Round, RoundResultLine, StudentRoundResultLine, WorksheetPreview } from '../../shared/api.js';
 import { currentRound, finalCorrectness, remainingWait, reviewFor, roundNumbering } from './rounds.js';
 import type { Identity } from './access.js';
 import { nextUnitId } from './question-queue.js';
 import { previewQuestion } from './questions.js';
-
-export function settlementFor(activity: Activity): ActivitySettlement | undefined {
-  if (!activity.settlementPublished) return undefined;
-  let roundCount = 0;
-  const wins = new Map<string, number>();
-  for (const round of activity.rounds) {
-    if (round.phase !== 'ended') continue;
-    roundCount++;
-    if (round.winnerGroupId) wins.set(round.winnerGroupId, (wins.get(round.winnerGroupId) ?? 0) + 1);
-  }
-  return { roundCount, groups: activity.groups.map(group => ({ ...group, wins: wins.get(group.id) ?? 0 }))
-    .sort((a, b) => b.wins - a.wins) };
-}
+import { activityStandings } from './scoring.js';
 
 export function makeView(activity: Activity, identity: Identity, now = performance.now(), retainReceipt = false): ActivityView {
   const round = currentRound(activity) ?? (retainReceipt && identity.role === 'student' ? activity.rounds.at(-1) : undefined);
@@ -25,6 +13,7 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     : activity.units.find(item => item.id === round.unitId));
   const key = identity.role === 'teacher' ? 'teacher' : `student:${identity.groupId}`;
   const hideQuestionDetails = identity.role === 'student' && round?.phase === 'preparing';
+  const standings = activityStandings(activity);
   const common: ActivityView = {
     phase: round?.phase ?? 'idle', roundId: round?.id ?? null,
     unit: unit ? {
@@ -37,7 +26,7 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     } : null,
     closedRoundIds: activity.rounds.filter(item => item.phase === 'ended').map(item => item.id),
     version: activity.viewVersions[key] ?? 0,
-    settlement: settlementFor(activity),
+    ...(activity.settlementPublished ? { settlement: standings } : { standings: standings.groups }),
   };
   if (identity.role === 'teacher') {
     if (activity.writebackInProgress) common.writebackInProgress = true;
@@ -66,13 +55,16 @@ export function makeView(activity: Activity, identity: Identity, now = performan
   } else {
     const groupId = identity.groupId!;
     const own = round?.submissions.find(item => item.groupId === groupId);
+    const published = round?.phase === 'ended' && own ? publishedAnswers(round) : undefined;
     common.groupId = groupId;
     common.groupName = activity.groups.find(g => g.id === groupId)?.name;
     common.received = Boolean(own);
-    common.ownAnswers = own?.answers.map(answer => ({
-      questionId: answer.questionId, text: answer.text,
-      ...(round?.phase === 'ended' ? { correct: finalCorrectness(answer) } : {}),
-    }));
+    common.ownAnswers = own?.answers.map(answer => {
+      const { questionId, text } = answer;
+      if (!published) return { questionId, text };
+      const correct = finalCorrectness(answer);
+      return { questionId, text, correct, ...(correct === false ? { publishedAnswer: published.get(questionId) } : {}) };
+    });
     common.waitRemainingMs = round?.phase === 'active' ? remainingWait(round, groupId, now) : 0;
   }
   return common;
@@ -100,15 +92,21 @@ export function resultsFor(round: Round): RoundResultLine[] | null {
   }));
 }
 
+function publishedAnswers(round: Round) {
+  const supplements = new Map(round.supplements?.map(entry => [entry.questionId, entry.text]));
+  return new Map(round.questions?.map(({ questionId, acceptedAnswers }) =>
+    [questionId, supplements.get(questionId) ?? acceptedAnswers.find(answer => answer.trim())]));
+}
+
 export function studentResultsFor(round: Round, groupId: string): StudentRoundResultLine[] | null {
   if (round.phase !== 'ended' || !round.questions) return null;
   const answers = new Map(round.submissions.find(row => row.groupId === groupId)?.answers.map(answer => [answer.questionId, answer]));
-  const supplements = new Map(round.supplements?.map(entry => [entry.questionId, entry.text]));
+  const published = publishedAnswers(round);
   return round.questions.map((question, index) => {
     const own = answers.get(question.questionId);
     const correct = own ? finalCorrectness(own) ?? null : null;
     return { ...roundNumbering(round, index), prompt: question.prompt, ownAnswer: own?.text ?? null, correct,
-      publishedAnswer: correct ? null : supplements.get(question.questionId) ?? question.acceptedAnswers.find(answer => answer.trim()) ?? null };
+      publishedAnswer: correct ? null : published.get(question.questionId) ?? null };
   });
 }
 

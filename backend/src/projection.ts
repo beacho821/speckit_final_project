@@ -2,7 +2,7 @@ import type { ProjectionView } from '../../shared/api.js';
 import type { Classroom } from './classrooms.js';
 import { currentRound } from './rounds.js';
 import { previewQuestion } from './questions.js';
-import { settlementFor } from './views.js';
+import { activityStandings } from './scoring.js';
 
 export function projectionFor(room: Classroom): ProjectionView {
   const activity = room.activity;
@@ -10,6 +10,7 @@ export function projectionFor(room: Classroom): ProjectionView {
   const published = round?.phase === 'ended';
   const visible = round && round.phase !== 'preparing';
   const winner = published && round.roster.find(group => group.id === round.winnerGroupId);
+  const standings = activityStandings(activity);
   return {
     classroomName: room.name,
     phase: round?.phase ?? 'idle',
@@ -21,7 +22,7 @@ export function projectionFor(room: Classroom): ProjectionView {
       id: group.id, name: group.name, received: Boolean(visible && round.submissions.some(item => item.groupId === group.id)),
     })),
     ...(winner ? { winnerGroupName: winner.name } : {}),
-    settlement: settlementFor(activity),
+    ...(activity.settlementPublished ? { settlement: standings } : { standings: standings.groups }),
     version: activity.viewVersions.projection ?? 0,
   };
 }

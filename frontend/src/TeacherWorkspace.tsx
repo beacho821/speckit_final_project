@@ -6,6 +6,7 @@ import ClassroomList from './ClassroomList';
 import TeacherRound from './TeacherRound';
 import TeacherResults, { useTeacherWriteback } from './TeacherResults';
 import Roster from './Roster';
+import Settlement from './Settlement';
 import WorksheetImport from './WorksheetImport';
 
 const rootPath = '/teacher/classrooms';
@@ -291,8 +292,11 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
         <button className="secondary-button" disabled={!canPublishSettlement}
           onClick={() => void publishSettlement()}>{view?.settlement ? '已公布結算' : publishingSettlement ? '公布中…' : '公布結算'}</button>
         <p className="muted" role="status">{view?.settlement ? '已同步至教室投影與學生端。'
-          : !view?.closedRoundIds.length ? '至少定案一個回合後即可公布結算。' : '公布後，教室投影與學生端會顯示各組勝場。'}</p>
+          : !view?.closedRoundIds.length ? '至少定案一個回合後即可公布結算。' : '公布後，教室投影與學生端會顯示最終排名。'}</p>
       </div>
+      {view?.settlement ? <Settlement settlement={view.settlement} />
+        : view?.standings && view.closedRoundIds.length > 0
+          && <Settlement settlement={{ roundCount: view.closedRoundIds.length, groups: view.standings }} preview />}
       <TeacherResults {...{ session, credential }} source={view?.worksheetPreview?.source}
         hasResults={Boolean(view?.closedRoundIds.length)}
         disabled={Boolean(settlementRestriction) || serverWriteback || starting}

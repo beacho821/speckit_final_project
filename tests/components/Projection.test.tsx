@@ -6,10 +6,28 @@ import { render, host } from '../helpers/ui';
 it('全班投影呈現公開的題目、組名與收件狀態', async () => {
   await render(<ProjectionDisplay view={{ classroomName: '測試教室', phase: 'active', title: '第一題',
     questions: [{ questionId: '1', prompt: '公開題幹', missingPrompt: false }],
-    groups: [{ id: 'g', name: '甲組', received: true }], version: 1 }} />);
+    groups: [{ id: 'g', name: '甲組', received: true }],
+    standings: [{ id: 'g', name: '甲組', rank: 1, points: 4 }], version: 1 }} />);
   expect(host.textContent).toContain('公開題幹');
   expect(host.textContent).toContain('已送出');
+  expect(host.textContent).toContain('即時排名');
+  expect(host.querySelector('.standings-list li')?.textContent).toBe('第 1 名甲組4 分已送出');
   expect(host.querySelector('button, input, nav')).toBeNull();
+});
+
+it('公布結算後顯示前三名，第三名同分並列', async () => {
+  await render(<ProjectionDisplay view={{ classroomName: '測試教室', phase: 'ended', questions: [], groups: [],
+    version: 2, settlement: { roundCount: 3, groups: [
+      { id: 'a', name: '甲組', rank: 1, points: 9 },
+      { id: 'b', name: '乙組', rank: 2, points: 6 },
+      { id: 'c', name: '丙組', rank: 3, points: 3 },
+      { id: 'd', name: '丁組', rank: 3, points: 3 },
+      { id: 'e', name: '戊組', rank: 5, points: 0 },
+    ] } }} />);
+  expect([...host.querySelectorAll('.settlement-top li strong')].map(element => element.textContent))
+    .toEqual(['甲組', '乙組', '丙組', '丁組']);
+  expect(host.textContent).toContain('第 5 名戊組0 分');
+  expect(host.textContent).not.toContain('即時排名');
 });
 
 it('全班投影只接受原教師視窗及同源訊息，收到撤銷後清除畫面', async () => {

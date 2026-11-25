@@ -201,6 +201,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .answer-feedback p { overflow-wrap: anywhere; white-space: pre-wrap; }
 .answer-feedback > .answer-feedback-correct { color: #176136; background: #e9f7ef; }
 .answer-feedback > .answer-feedback-incorrect { color: #962032; background: #fff0f1; }
+.answer-feedback .answer-feedback-reference { margin-top: 8px; color: var(--work-ink); }
 .join-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-block: 6px; }
 .join-code-row .join-code {
   max-width: 100%;
@@ -242,7 +243,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   line-height: 1.38;
 }
 .projection-grid ul { list-style: none; margin: 12px 0 0; padding: 0; }
-.projection-grid li { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; border-top: 1px solid #616a93; padding: 14px 0; font-size: clamp(1.1rem, 2vw, 1.9rem); }
+.projection-grid ul li { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; border-top: 1px solid #616a93; padding: 14px 0; font-size: clamp(1.1rem, 2vw, 1.9rem); }
 .projection-grid li span { color: #d4ceff; }
 @media (min-width: 900px) {
   .projection-grid { grid-template-columns: minmax(0, 2.15fr) minmax(0, 1fr); }
@@ -336,7 +337,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .student-history { overflow-wrap: anywhere; }
 .student-history-item { padding-block: 14px; border-block-start: 1px solid var(--work-line); }
 .student-history-item h3 { margin-bottom: 8px; }
-.student-history-item .published-answer { margin-top: 1lh; }
+.student-history-item .published-answer { display: block; margin-top: 0.5rem; }
 .student-history-item .outcome-correct { color: #176136; }
 .student-history-item .outcome-incorrect { color: #b42318; }
 .student-history .results-list > div { display: grid; gap: 10px; }
@@ -359,21 +360,32 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .settlement-own strong { overflow-wrap: anywhere; font-size: 1.25rem; }
 .settlement-own > div:last-child strong { font-size: 2rem; font-variant-numeric: tabular-nums; }
 .settlement-list-heading { margin: 24px 0 8px; font-size: 1rem; font-weight: 700; }
-.settlement-summary ul { margin: 0; padding: 0; list-style: none; }
-.settlement-summary li {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 8px 24px;
-  padding-block: 12px;
-  border-top: 1px solid var(--work-line, #616a93);
+.standings-list { margin: 0; padding: 0; list-style: none; }
+.standings-list li {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 12px 8px;
+  border-top: 1px solid var(--standings-line, var(--work-line));
 }
-.settlement-summary li span { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.standings-list strong { overflow-wrap: anywhere; }
+.standing-rank, .standing-points { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.standing-points { font-weight: 750; }
+.standing-receipt { grid-column: 2 / -1; font-size: .85em; }
+.standing-own { background: #efefff; color: #302b82; }
+.student-standings .muted { margin: 4px 0 12px; }
+.settlement-top { margin-block: 20px; padding: 12px 16px; border-radius: 12px; background: #f4f2ff; color: #302b82; }
+.settlement-top .settlement-list-heading { margin-top: 0; }
+.projection-screen { --standings-line: #616a93; }
+.projection-grid .standings-list { margin-top: 12px; font-size: clamp(1rem, 1.55vw, 1.45rem); }
 .projection-screen .settlement-summary { max-width: 56rem; padding-top: 28px; }
 .projection-screen .settlement-summary h2 { font-size: clamp(1.6rem, 3.4vw, 3rem); font-weight: 700; }
 .projection-screen .settlement-summary p, .projection-screen .settlement-summary li {
   font-size: clamp(1.15rem, 2.4vw, 2rem);
 }
+.projection-screen .settlement-top { background: #28274c; color: #eef0ff; }
+.projection-screen .settlement-list-heading { font-size: clamp(1.15rem, 2vw, 1.65rem); }
 .projection-screen .settlement-summary p, .projection-screen .settlement-summary li span { color: #d4ceff; }
 
 .question-icon {

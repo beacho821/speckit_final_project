@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { act as reactAct } from 'react';
+import type { ActivityView } from '../../shared/api';
+import { SESSION_KEY } from '../../frontend/src/session';
 import {it,expect,vi} from 'vitest';import App from '../../frontend/src/App';import {render,host,input,click,flush} from '../helpers/ui';
 it('學生欄位為加入碼與名稱、切角色清輸入；晚登入不能覆寫登出',async()=>{sessionStorage.clear();let resolve:(r:Response)=>void=()=>{};vi.spyOn(globalThis,'fetch').mockImplementation(()=>new Promise(r=>{resolve=r;}));await render(<App/>);await click('學生');expect(host.textContent).toContain('加入碼');expect(host.querySelector('[aria-label="名稱"]')).not.toBeNull();await input('加入碼','ABCDEFGH');await input('名稱','小明');await click('加入活動');await click('老師');await flush();resolve(Response.json({role:'student',activityId:'a',groupId:'g',groupName:'甲',memberId:'m',studentName:'小明'}));await flush();expect(host.textContent).not.toContain('學生工作台');expect(host.textContent).toContain('教師密碼');expect(sessionStorage.length).toBe(0);});
 it('沒有品牌或舊術語且教師密碼不存 Web Storage',async()=>{sessionStorage.clear();vi.spyOn(globalThis,'fetch').mockImplementation(async(input)=>String(input).startsWith('/api/view')?new Promise(()=>{}):Response.json(String(input)==='/api/classrooms'?[]:{role:'teacher'}));await render(<App/>);expect(host.textContent).not.toMatch(/課堂線上搶答|憑證|組別代碼/);await input('教師密碼','temporary-password');await click('登入活動');await flush();expect(host.textContent).toContain('我的教室');expect(sessionStorage.length).toBe(0);expect(localStorage.length).toBe(0);});
@@ -61,4 +63,48 @@ it('匯入結果不明時，先前連線恢復的快照不能解除開題鎖定'
   await act(async () => synced(Response.json(view)));
   expect(open().disabled).toBe(false);
   expect(host.textContent).not.toContain('匯入結果待確認');
+});
+
+it('學生可用導覽切換即時排名，保留作答草稿並在重整後回到排名', async () => {
+  const session = { role: 'student', activityId: 'a', groupId: 'g', memberId: 'm', groupName: '甲組', studentName: '小明' };
+  let view: ActivityView = { phase: 'active', roundId: 'r', unit: { id: 'u', questionIds: ['q'] }, closedRoundIds: [], version: 1,
+    standings: [{ id: 'g', name: '甲組', points: 0, rank: 1 }] };
+  let deliver!: (response: Response) => void;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    if (String(url) === '/api/sessions') return Response.json(session);
+    if (String(url) === '/api/view') return Response.json(view);
+    return new Promise((resolve, reject) => {
+      deliver = resolve;
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+  });
+  const navigate = (path: string) => reactAct(async () => host.querySelector<HTMLAnchorElement>(`nav a[href="${path}"]`)!.click());
+  history.replaceState(null, '', '/student/standings');
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, version: 1, joinCode: 'ABCDEFGH' }));
+  try {
+    await render(<App />);
+    expect(location.pathname).toBe('/student/standings');
+    expect(host.querySelector('nav a[aria-current="page"]')?.textContent).toBe('即時排名');
+    expect(document.activeElement?.textContent).toBe('即時排名');
+    await navigate('/student');
+    const draft = host.querySelector('textarea')!;
+    await reactAct(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(draft, '還沒送出的草稿');
+      draft.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(host.querySelector('.student-standings')).toBeNull();
+    await navigate('/student/standings');
+    expect(draft.closest('[hidden]')).not.toBeNull();
+    view = { ...view, version: 2, standings: [
+      { id: 'other', name: '乙組', points: 3, rank: 1 }, { id: 'g', name: '甲組', points: 2, rank: 2 },
+    ] };
+    await reactAct(async () => deliver(Response.json(view)));
+    expect(host.querySelector('.student-standings p')?.textContent).toBe('本組第 2 名 · 2 分');
+    await navigate('/student');
+    expect(host.querySelector('textarea')?.value).toBe('還沒送出的草稿');
+  } finally {
+    await render(null);
+    sessionStorage.clear();
+    history.replaceState(null, '', '/');
+  }
 });

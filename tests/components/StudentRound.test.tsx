@@ -18,6 +18,53 @@ async function mount(view: ActivityView = baseView) {
 }
 
 describe('學生作答互動', () => {
+  it('定案後只在答錯的小題下補上已公布答案，並保留原作答', async () => {
+    await mount();
+    const ownAnswers = [
+      { questionId: '1（1）', text: '原本的錯答' },
+      { questionId: '1（2）', text: '原本的對答' },
+    ];
+    const show = (view: ActivityView) => act(async () => root!.render(
+      <StudentRound session={session} credential="alpha" view={view} />,
+    ));
+    await show({ ...baseView, phase: 'reviewing', received: true, ownAnswers });
+    expect(host!.querySelector('.answer-feedback-reference')).toBeNull();
+    await show({ ...baseView, phase: 'ended', received: true, ownAnswers: [
+      { ...ownAnswers[0], correct: false, publishedAnswer: '已公布的答案' },
+      { ...ownAnswers[1], correct: true },
+    ] });
+    expect(host!.querySelector('.answer-feedback-incorrect')?.textContent).toContain('原本的錯答');
+    expect(host!.querySelector('.answer-feedback-reference')?.textContent).toBe('正確答案：已公布的答案');
+    expect(host!.querySelector('.answer-feedback-correct')?.textContent).toContain('原本的對答');
+    expect(host!.querySelector('.answer-feedback-correct .answer-feedback-reference')).toBeNull();
+  });
+
+  it('作答快照缺少正解時讀取已公布結果，讀取失敗可重試', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(Response.json([
+        { questionNumber: 1, partNumber: 1, prompt: '第一部分', ownAnswer: '甲', correct: false, publishedAnswer: '第一個正解' },
+        { questionNumber: 1, partNumber: 2, prompt: '第二部分', ownAnswer: '乙', correct: false, publishedAnswer: '第二個正解' },
+      ]));
+    await mount();
+    const ownAnswers = [{ questionId: '1（2）', text: '乙' }, { questionId: '1（1）', text: '甲' }];
+    await act(async () => root!.render(<StudentRound session={session} credential="alpha"
+      view={{ ...baseView, phase: 'reviewing', received: true, ownAnswers }} />));
+    expect(fetch).not.toHaveBeenCalled();
+    await act(async () => root!.render(<StudentRound session={session} credential="alpha"
+      view={{ ...baseView, phase: 'ended', received: true, ownAnswers: ownAnswers.map(answer => ({ ...answer, correct: false })) }} />));
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/rounds/round-test/results', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-Activity-Id': 'activity-test' }),
+    }));
+    expect(host!.textContent).toContain('載入失敗');
+    expect(host!.textContent).not.toContain('未提供');
+    await act(async () => host!.querySelector<HTMLButtonElement>('.answer-feedback button')!.click());
+    expect([...host!.querySelectorAll('.answer-feedback-reference')].map(row => row.textContent)).toEqual([
+      '正確答案：第二個正解', '正確答案：第一個正解',
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('完整題組送出後顯示收件確認', async () => {
     let submitted = false, delivered = false, resumePoll: (() => void) | undefined;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

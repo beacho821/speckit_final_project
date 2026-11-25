@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HistoryRound, RoundResultLine, SessionResponse, StudentRoundResultLine } from '../../shared/api';
 import { questionLabel } from './question-label';
-import { activityHeaders, ApiRequestError, readError, readList, requestMessage, requireOk } from './api';
+import { activityHeaders, fetchStudentRoundResults, readList, requestMessage, requireOk } from './api';
 
 export default function RoundHistory(props: { session: SessionResponse; credential: string; roundIds: string[]; snapshot?: number; onExpired?: () => void }) {
   return props.session.role === 'teacher' && props.session.classroomId
@@ -20,21 +20,9 @@ export function StudentHistory({ session, credential, roundIds, snapshot, onExpi
     const controller = new AbortController();
     const headers = activityHeaders(session, credential);
     setError('');
-    void Promise.all(roundIds.map(async id => {
-      const response = await fetch(`/api/rounds/${encodeURIComponent(id)}/results`, { headers, signal: controller.signal });
-      if (!response.ok) {
-        const issue = await readError(response);
-        if (!controller.signal.aborted && (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED')) onExpired?.();
-        if (response.status >= 500 && !issue.code) throw new Error();
-        throw new ApiRequestError(issue.message);
-      }
-      const rows = await readList<StudentRoundResultLine>(response);
-      if (rows.some(row => !row || !Number.isSafeInteger(row.questionNumber)
-        || (row.partNumber !== null && !Number.isSafeInteger(row.partNumber))
-        || ![row.prompt, row.ownAnswer, row.publishedAnswer].every(text => text === null || typeof text === 'string')
-        || (row.correct !== null && typeof row.correct !== 'boolean'))) throw new Error();
-      return { id, rows };
-    })).then(results => { if (!controller.signal.aborted) setHistory(results); })
+    void Promise.all(roundIds.map(async id => ({
+      id, rows: await fetchStudentRoundResults(id, headers, controller.signal, onExpired),
+    }))).then(results => { if (!controller.signal.aborted) setHistory(results); })
       .catch(cause => {
         if (!controller.signal.aborted) setError(requestMessage(cause, '歷史紀錄載入失敗，請確認連線後重新載入。'));
       });

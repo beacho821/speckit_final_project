@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ActivityView, SessionResponse } from '../../shared/api';
-import { activityHeaders, readError } from './api';
+import type { ActivityView, SessionResponse, StudentRoundResultLine } from '../../shared/api';
+import { activityHeaders, fetchStudentRoundResults, readError, requestMessage } from './api';
 import { questionLabel } from './question-label';
 import Settlement from './Settlement';
 
@@ -108,14 +108,51 @@ export default function StudentRound({ session, credential, view, syncError = ''
         <button className="primary" disabled={busy || pending !== undefined || remainingMs > 0} onClick={() => void submit()}>{busy ? '送出中…' : pending !== undefined ? '等待收件確認…' : '送出本組答案'}</button></>}
       {(view.received || view.phase === 'reviewing') && view.unit.questions?.map(question =>
         <p className="question-prompt" key={question.questionId}><b>{questionLabel(question)}</b> {question.prompt}</p>)}
-      {view.received && <div className="answer-feedback" aria-live="polite">
-        {view.phase !== 'ended' && <p className="muted">本組答案已收件，請等待老師公布結果。</p>}
-        {view.ownAnswers?.map(answer => <div key={answer.questionId}
-          className={answer.correct === true ? 'answer-feedback-correct' : answer.correct === false ? 'answer-feedback-incorrect' : undefined}>
-          {answer.correct !== undefined && <strong>{answer.correct ? '正確' : '錯誤'}</strong>}
-          <p>{labelFor(answer.questionId)}：{answer.text}</p>
-        </div>)}
-      </div>}
+      {view.received && <AnswerFeedback key={scope} {...{ view, session, credential, labelFor, onExpired }}
+        questionIds={view.unit.questionIds} />}
     </>}
   </section>;
+}
+
+function AnswerFeedback({ view, session, credential, labelFor, onExpired, questionIds }: {
+  view: ActivityView; session: SessionResponse; credential: string; labelFor: (id: string) => string;
+  onExpired?: () => void; questionIds: string[];
+}) {
+  const [published, setPublished] = useState<StudentRoundResultLine[]>();
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const ended = view.phase === 'ended';
+  const roundId = ended && view.ownAnswers?.some(answer => answer.correct === false && !answer.publishedAnswer?.trim())
+    ? view.roundId : null;
+
+  useEffect(() => {
+    if (!roundId) return;
+    const controller = new AbortController();
+    void fetchStudentRoundResults(roundId, activityHeaders(session, credential), controller.signal, onExpired)
+      .then(rows => { if (!controller.signal.aborted) setPublished(rows); })
+      .catch(cause => {
+        if (!controller.signal.aborted) setError(requestMessage(cause, '無法載入正確答案，請重試。'));
+      });
+    return () => controller.abort();
+  }, [roundId, session, credential, onExpired, retry]);
+
+  return <div className="answer-feedback" aria-live="polite">
+    {!ended && <p className="muted">本組答案已收件，請等待老師公布結果。</p>}
+    {view.ownAnswers?.map(answer => {
+      // The results endpoint returns the frozen round's questions in the same order as the view.
+      const row = published?.length === questionIds.length ? published[questionIds.indexOf(answer.questionId)] : undefined;
+      const reference = answer.publishedAnswer?.trim() ? answer.publishedAnswer
+        : row?.correct === false && row.ownAnswer === answer.text ? row.publishedAnswer : undefined;
+      return <div key={answer.questionId}
+        className={answer.correct === true ? 'answer-feedback-correct' : answer.correct === false ? 'answer-feedback-incorrect' : undefined}>
+        {answer.correct !== undefined && <strong>{answer.correct ? '正確' : '錯誤'}</strong>}
+        <p>{labelFor(answer.questionId)}：{answer.text}</p>
+        {ended && answer.correct === false && <p className="answer-feedback-reference">
+          <strong>正確答案：</strong>{reference ?? (error ? '載入失敗' : published ? '未提供' : '載入中…')}
+        </p>}
+      </div>;
+    })}
+    {roundId && error && <p className="error">{error} <button className="secondary-button"
+      onClick={() => { setError(''); setRetry(value => value + 1); }}>重新載入</button></p>}
+  </div>;
 }

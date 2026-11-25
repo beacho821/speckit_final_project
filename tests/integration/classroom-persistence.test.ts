@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Classrooms } from '../../backend/src/classrooms.js';
 import { openClassroomStorage } from '../../backend/src/classroom-store.js';
+import { projectionFor } from '../../backend/src/projection.js';
 import { basic, classroom } from '../helpers/classroom';
 
 it('收件保存後可由另一進程恢復審核，轉換存檔失敗時只停用該教室', async () => {
@@ -83,6 +84,10 @@ it('兩間各兩組與兩筆定案在重啟後保留，刪除其中一間後另�
       expect(room.activity.groups.map(group => group.name)).toEqual(['乙組', '甲組']);
       expect(restored.history(room).map(entry => entry.questionNumber)).toEqual([2, 1]);
       expect(room.activity.settlementPublished).toBe(true);
+      expect(projectionFor(room).settlement).toMatchObject({ roundCount: 2, groups: [
+        { name: '甲組', points: 6, rank: 1 },
+        { name: '乙組', points: 0, rank: 2 },
+      ] });
       for (const round of room.activity.rounds) expect(round.submissions[0]).toMatchObject({ rank: 1, answers: [{ text: '答案', autoCorrect: true }] });
     }
     expect(restored.lookup(oldCode)).toBeUndefined();

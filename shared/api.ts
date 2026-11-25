@@ -103,7 +103,8 @@ export interface ActivityView {
   rosterVersion?: number;
   worksheetPreview?: WorksheetPreview | null;
   received?: boolean;
-  ownAnswers?: Array<{ questionId: string; text: string; correct?: boolean }>;
+  ownAnswers?: Array<{ questionId: string; text: string; correct?: boolean; publishedAnswer?: string }>;
+  standings?: GroupStanding[];
   settlement?: ActivitySettlement;
   waitRemainingMs?: number;
   version: number;
@@ -150,9 +151,13 @@ export interface ArchivedRoster {
   groups: Array<GroupSummary & { members: Array<{ id: string; name: string }> }>;
 }
 export interface HistoryRound { activityId: string; startedAt: number; roundId: string; title: string; questionNumber?: number; winnerGroupName?: string }
+export interface GroupStanding extends GroupSummary {
+  points: number;
+  rank: number;
+}
 export interface ActivitySettlement {
   roundCount: number;
-  groups: Array<GroupSummary & { wins: number }>;
+  groups: GroupStanding[];
 }
 export interface ProjectionView {
   classroomName: string;
@@ -161,6 +166,7 @@ export interface ProjectionView {
   questions: QuestionPreview[];
   groups: Array<{ id: string; name: string; received: boolean }>;
   winnerGroupName?: string;
+  standings?: GroupStanding[];
   settlement?: ActivitySettlement;
   version: number;
 }
