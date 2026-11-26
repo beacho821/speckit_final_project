@@ -23,7 +23,20 @@ it('舊回合的人工補答與自動補答一同封存，角色結果與 CSV �
       { questionId: first, text: legacy, source: 'legacy' },
       { questionId: second, text: '標準 ' + second, source: 'configured' },
     ]);
+    const projection = '/classrooms/' + c.room.id + '/projection';
+    const reviewing = await (await c.request(projection)).json();
+    expect(reviewing.phase).toBe('reviewing');
+    expect(reviewing.questions).toHaveLength(2);
+    expect(JSON.stringify(reviewing.questions)).not.toMatch(/publishedAnswer|acceptedAnswers|原有補答|標準/);
+    const projectionUpdate = c.request(projection + '?after=' + reviewing.version);
     expect((await c.request('/rounds/' + round.id + '/publish', c.teacher, { reviewRevision: 0 }, 'POST')).status).toBe(200);
+    const published = await (await projectionUpdate).json();
+    expect(published.phase).toBe('ended');
+    expect(published.questions).toMatchObject([
+      { questionId: first, partNumber: 1, publishedAnswer: legacy },
+      { questionId: second, partNumber: 2, publishedAnswer: '標準 ' + second },
+    ]);
+    expect(JSON.stringify(published)).not.toMatch(/acceptedAnswers|錯誤作答/);
     const teacher = await (await c.request('/rounds/' + round.id + '/results')).json();
     const learner = await (await c.request('/rounds/' + round.id + '/results', student.headers)).json();
     expect(teacher.map((row: { teacherAnswer: string }) => row.teacherAnswer)).toEqual([legacy, '標準 ' + second]);

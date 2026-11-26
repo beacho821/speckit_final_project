@@ -41,7 +41,8 @@ function isProjectionView(value: unknown): value is ProjectionView {
     && (view.settlement === undefined || (view.settlement && Number.isSafeInteger(view.settlement.roundCount)
       && isStandings(view.settlement.groups)))
     && Array.isArray(view.questions) && view.questions.every(question => question
-      && typeof question.questionId === 'string' && (question.prompt === null || typeof question.prompt === 'string'));
+      && typeof question.questionId === 'string' && (question.prompt === null || typeof question.prompt === 'string')
+      && (question.publishedAnswer === undefined || (view.phase === 'ended' && typeof question.publishedAnswer === 'string')));
 }
 
 function isProjectionState(value: unknown): value is ProjectionState {
@@ -304,7 +305,12 @@ export function ProjectionDisplay({ view, reconnecting = false }: { view: Projec
     {view.settlement ? <Settlement settlement={view.settlement} /> : <div className="projection-grid">
       <section className="projection-question">
         {view.questions.length ? <><h2>{view.questions[0].questionNumber === undefined ? view.title ?? '目前題目' : questionLabel({ questionNumber: view.questions[0].questionNumber })}</h2>
-          {view.questions.map(question => <p key={question.questionId}>{(question.partNumber != null || (question.questionNumber === undefined && (view.questions.length > 1 || view.title !== question.questionId))) && <><b>{questionLabel(question)}</b>{' '}</>}{question.prompt}</p>)}</>
+          {view.questions.map(question => <div key={question.questionId}>
+            <p>{(question.partNumber != null || (question.questionNumber === undefined && (view.questions.length > 1 || view.title !== question.questionId))) && <><b>{questionLabel(question)}</b>{' '}</>}{question.prompt}</p>
+            {view.phase === 'ended' && <p className="projection-answer">
+              <strong>正確答案</strong><span>{question.publishedAnswer?.trim() ? question.publishedAnswer : '未提供'}</span>
+            </p>}
+          </div>)}</>
           : <h2>等待老師開放搶答</h2>}
         {view.phase === 'ended' && view.winnerGroupName && <p>勝組：{view.winnerGroupName}</p>}
       </section>

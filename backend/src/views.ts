@@ -1,6 +1,6 @@
 import type { Activity } from './activity.js';
 import type { ActivityView, Round, RoundResultLine, StudentRoundResultLine, WorksheetPreview } from '../../shared/api.js';
-import { currentRound, finalCorrectness, remainingWait, reviewFor, roundNumbering } from './rounds.js';
+import { currentRound, finalCorrectness, publishedAnswers, remainingWait, reviewFor, roundNumbering } from './rounds.js';
 import type { Identity } from './access.js';
 import { nextUnitId } from './question-queue.js';
 import { previewQuestion } from './questions.js';
@@ -90,12 +90,6 @@ export function resultsFor(round: Round): RoundResultLine[] | null {
       };
     }),
   }));
-}
-
-function publishedAnswers(round: Round) {
-  const supplements = new Map(round.supplements?.map(entry => [entry.questionId, entry.text]));
-  return new Map(round.questions?.map(({ questionId, acceptedAnswers }) =>
-    [questionId, supplements.get(questionId) ?? acceptedAnswers.find(answer => answer.trim())]));
 }
 
 export function studentResultsFor(round: Round, groupId: string): StudentRoundResultLine[] | null {

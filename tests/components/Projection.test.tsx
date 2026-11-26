@@ -30,6 +30,24 @@ it('公布結算後顯示前三名，第三名同分並列', async () => {
   expect(host.textContent).not.toContain('即時排名');
 });
 
+it('定案後在各小題下方顯示正解，準備下一回合時清除', async () => {
+  const view = {
+    classroomName: '測試教室', groups: [],
+    questions: [
+      { questionId: 'a', prompt: '第一部分題幹', missingPrompt: false, questionNumber: 1, partNumber: 1, publishedAnswer: '第一部分答案\n補充說明' },
+      { questionId: 'b', prompt: '第二部分題幹', missingPrompt: false, questionNumber: 1, partNumber: 2, publishedAnswer: '第二部分答案' },
+    ],
+  };
+  await render(<ProjectionDisplay view={{ ...view, phase: 'reviewing', version: 1 }} />);
+  expect(host.querySelector('.projection-answer')).toBeNull();
+  await render(<ProjectionDisplay view={{ ...view, phase: 'ended', version: 2 }} />);
+  const answers = [...host.querySelectorAll('.projection-answer')];
+  expect(answers.map(answer => answer.querySelector('span')?.textContent)).toEqual(['第一部分答案\n補充說明', '第二部分答案']);
+  expect(answers[1].previousElementSibling?.textContent).toContain('第 1 題，第 2 部分');
+  await render(<ProjectionDisplay view={{ ...view, questions: [], phase: 'preparing', version: 3 }} />);
+  expect(host.querySelector('.projection-answer')).toBeNull();
+});
+
 it('全班投影只接受原教師視窗及同源訊息，收到撤銷後清除畫面', async () => {
   const { act } = await import('react');
   const { ProjectionEntry } = await import('../../frontend/src/Projection');

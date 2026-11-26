@@ -140,6 +140,12 @@ export function finalCorrectness(answer: Answer): boolean | undefined {
   return answer.overrideCorrect ?? answer.autoCorrect;
 }
 
+export function publishedAnswers(round: Round) {
+  const supplements = new Map(round.supplements?.map(entry => [entry.questionId, entry.text]));
+  return new Map(round.questions?.map(({ questionId, acceptedAnswers }) =>
+    [questionId, supplements.get(questionId) ?? acceptedAnswers.find(answer => answer.trim())]));
+}
+
 export function reviewFor(round: Round): ReviewView {
   const questions = round.questions ?? [];
   const candidates = supplementCandidates(questions, round.supplements ?? []);

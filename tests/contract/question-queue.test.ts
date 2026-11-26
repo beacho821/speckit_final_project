@@ -92,6 +92,7 @@ it('同一清單版本並行開題只成功一次，學生歷史各自顯示本�
     ] };
     expect(rankedStudent.standings).toEqual(summary.groups);
     expect(rankedProjection.standings).toEqual(summary.groups);
+    expect(rankedProjection.questions).toMatchObject([{ questionId: question.questionId, publishedAnswer: '標準答案' }]);
     const waiting = c.request(projection + '?after=' + before.version);
     expect((await publish()).status).toBe(200);
     expect((await (await waiting).json()).settlement).toEqual(summary);

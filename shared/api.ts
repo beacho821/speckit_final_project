@@ -163,7 +163,7 @@ export interface ProjectionView {
   classroomName: string;
   phase: ActivityView['phase'];
   title?: string;
-  questions: QuestionPreview[];
+  questions: Array<QuestionPreview & { publishedAnswer?: string }>;
   groups: Array<{ id: string; name: string; received: boolean }>;
   winnerGroupName?: string;
   standings?: GroupStanding[];
