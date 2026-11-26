@@ -126,24 +126,25 @@ export default function WorksheetImport({
   return <section className="round-panel">
     <h2>匯入學習單</h2>
     {locked ? <p className="muted">已有回合開始，學習單已鎖定。</p> : <>
-      <p className="muted">選擇本機 XLSX，或貼上 Google 試算表網址。匯入後會將全部題目排入出題清單。</p>
+      <p className="muted">匯入後會將全部題目排入出題清單。</p>
       <div className="role-switch" role="group" aria-label="學習單來源">
         <button aria-pressed={mode === 'google'} disabled={disabled} className={mode === 'google' ? 'active' : ''} onClick={() => switchMode('google')}>Google 試算表</button>
         <button aria-pressed={mode === 'xlsx'} disabled={disabled} className={mode === 'xlsx' ? 'active' : ''} onClick={() => switchMode('xlsx')}>本機 XLSX</button>
       </div>
       <form className="form-stack" onSubmit={event => { event.preventDefault(); void importSheet(); }}>
-        {mode === 'google' && <>
+        {mode === 'google' ? <>
           <label htmlFor="sheet-url">Google 試算表網址</label>
           <input id="sheet-url" aria-label="Google 試算表網址" type="url" required disabled={disabled} value={url}
             onChange={event => { setUrl(event.target.value); resetSelection(); }} />
+        </> : <>
+          <label htmlFor="xlsx-file">XLSX 學習單（上限 10 MB）</label>
+          <input id="xlsx-file" type="file" accept=".xlsx" disabled={disabled} onChange={event => {
+            const selected = event.target.files?.[0];
+            if (selected) { setFile(selected); resetSelection(); }
+            event.target.value = '';
+          }} />
+          {file && <p className="muted">已選擇：{file.name}</p>}
         </>}
-        <label htmlFor="xlsx-file">XLSX 學習單（上限 10 MB）</label>
-        <input id="xlsx-file" type="file" accept=".xlsx" disabled={disabled} onChange={event => {
-          const selected = event.target.files?.[0];
-          if (selected) { setFile(selected); setMode('xlsx'); resetSelection(); }
-          event.target.value = '';
-        }} />
-        {mode === 'xlsx' && file && <p className="muted">已選擇：{file.name}</p>}
         <button ref={importButton} className="primary" disabled={disabled || (mode === 'xlsx' && !file)}>{busy ? '正在匯入…' : '匯入並預覽'}</button>
       </form>
       {candidates.length > 0 && <div className="form-stack">

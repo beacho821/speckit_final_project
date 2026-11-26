@@ -143,12 +143,13 @@ function recordFrom(raw: unknown, id: string): ClassroomRecord {
     }
     if (activity.queueUnitIds !== undefined) {
       const queue = activity.queueUnitIds;
-      if (!Array.isArray(queue) || new Set(queue).size !== queue.length || queue.some(id => !units.has(id))) {
+      if (!Array.isArray(queue)) throw new Error('出題清單格式不正確。');
+      const queued = new Set(queue);
+      if (queued.size !== queue.length || queue.some(id => !units.has(id))) {
         throw new Error('出題清單與題庫不一致。');
       }
-      const manual = activity.units.filter(unit => unit.questions[0]?.origin === 'manual').map(unit => unit.id);
-      if (manual.some((id, index) => queue[queue.length - manual.length + index] !== id)) {
-        throw new Error('手動題的出題順序不一致。');
+      if (activity.units.some(unit => unit.questions[0]?.origin === 'manual' && !queued.has(unit.id))) {
+        throw new Error('出題清單缺少手動題。');
       }
     }
     let questionNumber = 0;

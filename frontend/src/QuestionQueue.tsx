@@ -67,7 +67,7 @@ export default function QuestionQueue({ items, sortable, disabled, catalogRevisi
     order.splice(from, 1);
     order.splice(to, 0, id);
     if (focus) focusAfterMove.current = { id, to, preferred: focus };
-    if (await onReorder(order)) setAnnouncement(`題目已移至學習單待開放清單的第 ${to + 1} 個位置。`);
+    if (await onReorder(order)) setAnnouncement(`題目已移至待開放清單的第 ${to + 1} 個位置。`);
     else focusAfterMove.current = null;
   }
 

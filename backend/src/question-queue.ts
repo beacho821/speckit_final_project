@@ -29,14 +29,17 @@ function queueView(activity: Activity) {
   return { queueUnitIds: activity.queueUnitIds, catalogRevision: activity.catalogRevision };
 }
 
-export function reorderQueue(activity: Activity, input: { worksheetUnitIds?: unknown; catalogRevision?: unknown }) {
+export function reorderQueue(activity: Activity, input: { unitIds?: unknown; worksheetUnitIds?: unknown; catalogRevision?: unknown }) {
   requireCatalogRevision(activity, input.catalogRevision);
   const opened = openedUnits(activity);
-  const worksheet = new Set(activity.units.filter(unit => unit.questions[0]?.origin === 'worksheet').map(unit => unit.id));
-  const eligible = new Set(activity.queueUnitIds.filter(id => worksheet.has(id) && !opened.has(id)));
-  const order = input.worksheetUnitIds;
+  const worksheetOnly = input.unitIds === undefined && input.worksheetUnitIds !== undefined;
+  const worksheet = worksheetOnly
+    ? new Set(activity.units.filter(unit => unit.questions[0]?.origin === 'worksheet').map(unit => unit.id))
+    : null;
+  const eligible = new Set(activity.queueUnitIds.filter(id => !opened.has(id) && (!worksheet || worksheet.has(id))));
+  const order = worksheetOnly ? input.worksheetUnitIds : input.unitIds;
   if (!Array.isArray(order) || order.length !== eligible.size || new Set(order).size !== order.length
-    || !order.every(id => eligible.has(id))) throw new DomainError(422, 'INVALID_QUEUE_ORDER', '請重新排列所有尚未開放的學習單題目。');
+    || !order.every(id => eligible.has(id))) throw new DomainError(422, 'INVALID_QUEUE_ORDER', '請重新排列所有可排序的待開放題目。');
   let index = 0;
   const next = activity.queueUnitIds.map(id => eligible.has(id) ? order[index++] as string : id);
   if (next.some((id, i) => id !== activity.queueUnitIds[i])) {

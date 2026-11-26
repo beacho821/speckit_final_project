@@ -15,6 +15,11 @@ const view: ActivityView = {
     { id: 'v', name: '第二張', questions: [alternate], opened: false }],
   queueUnitIds: ['u', 'v'], nextUnitId: 'u', groups: [{ id: 'g', name: '甲', received: false }],
 };
+const mixedView: ActivityView = {
+  ...view, questionCards: [view.questionCards![0], {
+    ...view.questionCards![1], questions: [{ ...alternate, origin: 'manual' }],
+  }],
+};
 const show = (current: ActivityView, blocked = false) =>
   render(<TeacherRound session={session} credential="test" view={current} blocked={blocked} />);
 
@@ -50,13 +55,15 @@ it('跨分頁換來源後仍可看見失效草稿，新題可以獨立開題', a
   expect(start()?.disabled).toBe(false);
 });
 
-it('上移和下移提交完整的待開放學習單順序', async () => {
+it('手動題可用上移按鈕排到學習單題目前面', async () => {
   const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
-  await show(view);
+  await show(mixedView);
   const second = host.querySelector('[data-queue-id="v"]')!;
   await act(async () => second.querySelector<HTMLButtonElement>('[data-move="up"]')!.click());
   expect(fetch.mock.calls[0][0]).toBe('/api/question-queue');
-  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ worksheetUnitIds: ['v', 'u'], catalogRevision: 1 });
+  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ unitIds: ['v', 'u'], catalogRevision: 1 });
+  expect(host.textContent).toContain('題目已移至待開放清單的第 1 個位置。');
+  expect(host.querySelector('.work-message')).toBeNull();
 });
 
 it('刪除確認不會用新版的版本刪除同識別的新題', async () => {
@@ -72,6 +79,36 @@ it('刪除確認不會用新版的版本刪除同識別的新題', async () => {
   await click('刪除題目');
   await click('確認刪除');
   expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ catalogRevision: 2 });
+  expect(host.querySelector('.work-message')).toBeNull();
+});
+
+it('新增後開啟刪除確認及完成刪除時皆不顯示通用成功提示', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
+  const importedOnly = { ...view, questionCards: view.questionCards!.slice(0, 1), queueUnitIds: ['u'] };
+  await show(importedOnly);
+  await click('新增題目');
+  const [prompt, answers] = host.querySelectorAll('dialog[open] textarea');
+  await act(async () => {
+    for (const [field, value] of [[prompt, alternate.prompt], [answers, '答案']] as const) {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+  await click('儲存題目');
+  expect(fetch.mock.calls[0][0]).toBe('/api/questions');
+  await show({ ...mixedView, catalogRevision: 2 });
+  const remove = host.querySelector<HTMLButtonElement>('[data-queue-id="v"] [aria-label="刪除題目"]')!;
+  await act(async () => remove.click());
+  const dialog = host.querySelector<HTMLDialogElement>('dialog[aria-labelledby=delete-question-title]')!;
+  expect(dialog.open).toBe(true);
+  expect(host.textContent).not.toContain('操作已完成。');
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await click('確認刪除');
+  expect(fetch.mock.calls[1]).toEqual(['/api/questions/units/v', expect.objectContaining({ method: 'DELETE' })]);
+  expect(dialog.open).toBe(false);
+  await show({ ...importedOnly, catalogRevision: 3 });
+  expect(host.querySelector('[data-queue-id="v"]')).toBeNull();
+  expect(host.textContent).not.toContain('操作已完成。');
 });
 
 it('拖曳期間收到新版清單時取消拖曳，不會提交舊順序', async () => {
@@ -90,7 +127,7 @@ it('拖曳期間收到新版清單時取消拖曳，不會提交舊順序', asyn
   expect(fetch).not.toHaveBeenCalled();
   const row = host.querySelector('[data-queue-id="u"]')!;
   await act(async () => { row.querySelector<HTMLButtonElement>('[data-move=up]')!.click(); });
-  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ worksheetUnitIds: ['u', 'v'], catalogRevision: 2 });
+  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ unitIds: ['u', 'v'], catalogRevision: 2 });
 });
 
 it.each([true, false])('題卡回應遺失，依本次完整同步核對是否已存（相符：%s）', async matches => {
@@ -114,11 +151,11 @@ it.each([true, false])('題卡回應遺失，依本次完整同步核對是否�
   expect(fetch).toHaveBeenCalledOnce();
 });
 
-it('拖曳預覽與放開共用落點，取消不提交排序', async () => {
+it('手動題可拖到學習單題目前面，取消拖曳時保持原順序', async () => {
   const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
-  await show(view);
-  const handle = host.querySelector<HTMLElement>('[data-queue-id="u"] .drag-handle')!;
-  const row = host.querySelector<HTMLElement>('[data-queue-id="v"]')!;
+  await show(mixedView);
+  const handle = host.querySelector<HTMLElement>('[data-queue-id="v"] .drag-handle')!;
+  const row = host.querySelector<HTMLElement>('[data-queue-id="u"]')!;
   handle.setPointerCapture = vi.fn();
   handle.releasePointerCapture = vi.fn();
   handle.hasPointerCapture = () => true;
@@ -127,19 +164,19 @@ it('拖曳預覽與放開共用落點，取消不提交排序', async () => {
   const previous = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
   Object.defineProperty(document, 'elementFromPoint', { value: hit, configurable: true });
   const dispatch = (type: string) => act(async () => {
-    handle.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientY: 70 }), { pointerId: 1, isPrimary: true }));
+    handle.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientY: 40 }), { pointerId: 1, isPrimary: true }));
   });
   try {
     await dispatch('pointerdown');
     await dispatch('pointermove');
-    expect(row.classList.contains('queue-insert-after')).toBe(true);
-    expect(host.querySelector('.queue-preview')?.textContent).toContain(question.prompt);
+    expect(row.classList.contains('queue-insert-before')).toBe(true);
+    expect(host.querySelector('.queue-preview')?.textContent).toContain(alternate.prompt);
     await dispatch('pointercancel');
     expect(host.querySelector('.queue-preview')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     await dispatch('pointerdown');
     await dispatch('pointerup');
-    expect(JSON.parse(String(fetch.mock.lastCall?.[1]?.body))).toEqual({ worksheetUnitIds: ['v', 'u'], catalogRevision: 1 });
+    expect(JSON.parse(String(fetch.mock.lastCall?.[1]?.body))).toEqual({ unitIds: ['v', 'u'], catalogRevision: 1 });
   } finally {
     if (previous) Object.defineProperty(document, 'elementFromPoint', previous);
     else Reflect.deleteProperty(document, 'elementFromPoint');

@@ -7,6 +7,43 @@ import { Classrooms } from '../../backend/src/classrooms.js';
 import { openClassroomStorage } from '../../backend/src/classroom-store.js';
 import { projectionFor } from '../../backend/src/projection.js';
 import { basic, classroom } from '../helpers/classroom';
+import { worksheet } from '../helpers/worksheet';
+
+it('手動題可混合排序，首次匯入與重啟保留手動題相對順序，已開放題固定', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'classroom-queue-order-'));
+  const password = randomUUID();
+  const initial = await Classrooms.restore(await openClassroomStorage(directory), password);
+  const c = await classroom({ importWorksheet: async () => ({ worksheet: structuredClone(worksheet) }) }, initial, password);
+  try {
+    await c.group();
+    const add = async (prompt: string) => {
+      const response = await c.request('/questions', c.teacher, { prompt }, 'POST');
+      expect(response.status).toBe(201);
+      return (await response.json()).unitId as string;
+    };
+    const first = await add('第一個手動題');
+    const second = await add('第二個手動題');
+    const reorder = (unitIds: string[]) => c.rawRequest('/question-queue', c.teacher, {
+      unitIds, catalogRevision: c.activity.catalogRevision,
+    }, 'PUT');
+    expect((await reorder([second, first])).status).toBe(200);
+    expect((await c.request('/worksheet/import', c.teacher, { url: 'fixture' }, 'POST')).status).toBe(200);
+    expect(c.activity.queueUnitIds).toEqual(['u', second, first]);
+    expect((await reorder([first, 'u', second])).status).toBe(200);
+    const opened = await c.rawRequest('/rounds/open-next', c.teacher, {
+      unitId: first, catalogRevision: c.activity.catalogRevision,
+    }, 'POST');
+    expect(opened.status).toBe(201);
+    expect((await opened.json()).sequenceNumber).toBe(1);
+    expect((await reorder([second, 'u', first])).status).toBe(422);
+    expect((await reorder([second, 'u'])).status).toBe(200);
+    const restored = await Classrooms.restore(await openClassroomStorage(directory), password);
+    expect(restored.get(c.room.id).activity.queueUnitIds).toEqual([first, second, 'u']);
+  } finally {
+    await c.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 it('收件保存後可由另一進程恢復審核，轉換存檔失敗時只停用該教室', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'classroom-restart-'));
@@ -157,7 +194,6 @@ it('刪除舊版準備題以單次存檔清除回合與題卡，失敗後可重�
 });
 
 it('整卡保存失敗不改任何部分，成功後可從存檔復原', async () => {
-  const { worksheet } = await import('../helpers/worksheet');
   const directory = await mkdtemp(join(tmpdir(), 'classroom-save-card-'));
   const password = randomUUID();
   const storage = await openClassroomStorage(directory);

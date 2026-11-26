@@ -31,7 +31,7 @@
 ## 題卡刪除與排序（FR-005、FR-006）
 
 - `DELETE /api/questions/units/:unitId` 沿用 `{ catalogRevision }`。成功回傳新清單與目錄版本，原子移除未開放題卡、清單項目及相依的舊準備回合。已開放或版本衝突時拒絕。
-- `PUT /api/question-queue` 沿用 `{ worksheetUnitIds, catalogRevision }`。必須是所有可排序題卡的完整排列。驗證成功回傳 `{ queueUnitIds, catalogRevision }`。無效或過期時保留已提交的順序。
+- `PUT /api/question-queue` 接受 `{ unitIds, catalogRevision }`。須提交所有待開放題卡的完整排列，包含手動題及匯入題。舊版 `{ worksheetUnitIds, catalogRevision }` 仍可調整待開放匯入題的相對順序。驗證成功回傳 `{ queueUnitIds, catalogRevision }`。無效或過期時保留已提交的順序。
 - `POST /api/rounds/open-next` 沿用目錄版本與下一題檢查。開題與整卡儲存若競爭，後取得交易者重查版本和狀態。
 
 ## 教室定位與投影（FR-001 至 FR-003）

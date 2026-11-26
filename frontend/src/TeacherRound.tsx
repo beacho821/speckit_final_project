@@ -162,7 +162,6 @@ export default function TeacherRound({ session, credential, view, syncError = ''
         setSaved(current => ({ ...current, [result.unit.id]: result }));
         closeEditor(cardSave.key);
       }
-      setMessage('操作已完成。');
       setPendingRefresh(undefined);
       refresh?.();
       return true;
@@ -250,11 +249,8 @@ export default function TeacherRound({ session, credential, view, syncError = ''
   const queued = (view.queueUnitIds ?? []).filter(id => byId.has(id));
   const opened = queued.filter(id => byId.get(id)?.opened)
     .sort((a, b) => (byId.get(a)?.questionNumber ?? 0) - (byId.get(b)?.questionNumber ?? 0));
-  const queue = [...opened, ...queued.filter(id => !byId.get(id)?.opened)];
-  const sortable = queue.filter(id => {
-    const card = byId.get(id);
-    return !card?.opened && card?.questions[0]?.origin === 'worksheet';
-  });
+  const sortable = queued.filter(id => !byId.get(id)?.opened);
+  const queue = [...opened, ...sortable];
   const next = view.nextUnitId ? byId.get(view.nextUnitId) : undefined;
   const roundPath = view.roundId ? `/api/rounds/${view.roundId}` : undefined;
   const title = view.phase === 'idle' && view.closedRoundIds.length ? '已定案' :
@@ -291,6 +287,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
           </button>
           <button className="quiet question-icon question-delete" type="button" aria-label="刪除題目" title="刪除題目" disabled={disabled}
             onClick={event => {
+              setMessage('');
               deleteTrigger.current = event.currentTarget;
               setDeleting({ id: card.id, revision: catalogRevision });
               deleteDialog.current?.showModal();
@@ -345,7 +342,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
           onAdd={(prompt, acceptedAnswersText) => action('/api/questions', { prompt, acceptedAnswersText, catalogRevision })} />
       </div>
       <QuestionQueue items={queue} sortable={sortable} disabled={disabled} catalogRevision={catalogRevision}
-        onReorder={worksheetUnitIds => action('/api/question-queue', { worksheetUnitIds, catalogRevision }, 'PUT')}
+        onReorder={unitIds => action('/api/question-queue', { unitIds, catalogRevision }, 'PUT')}
         renderItem={(id, index) => renderCard(byId.get(id)!, index)}
         previewLabel={id => byId.get(id)?.questions[0]?.prompt ?? '缺少題幹'} />
       {lostDrafts.length > 0 && <details className="question-editor">

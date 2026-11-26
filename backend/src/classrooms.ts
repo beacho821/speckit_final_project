@@ -69,8 +69,8 @@ export class Classrooms {
       }
       const manual = current.units.filter(unit => unit.questions[0]?.origin === 'manual').map(unit => unit.id);
       const worksheetIds = new Set(current.units.filter(unit => unit.questions[0]?.origin === 'worksheet').map(unit => unit.id));
-      const queued = current.queueUnitIds ?? current.rounds.map(round => round.unitId);
-      const queueUnitIds = [...new Set([...queued.filter(id => worksheetIds.has(id)), ...worksheetIds]), ...manual];
+      const queued = current.queueUnitIds ?? current.rounds.map(round => round.unitId).filter(id => worksheetIds.has(id));
+      const queueUnitIds = [...new Set([...queued, ...worksheetIds, ...manual])];
       const activity = { ...createActivity(), ...current, queueUnitIds, members: new Map(current.members.map(member => [member.id, member])) };
       const room = {
         id: record.id, name: record.name, createdAt: record.createdAt, updatedAt: record.updatedAt,
