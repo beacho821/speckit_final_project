@@ -90,6 +90,7 @@ export default function StudentRound({ session, credential, view, syncError = ''
     {syncError && <p className="error" role="status">{syncError}</p>}
     <Settlement settlement={view.settlement} ownGroupId={session.groupId} />
   </div>;
+  const unanswered = !view.received && view.phase === 'ended';
   const title = view.received ? (view.phase === 'ended' ? '本組作答結果' : '本組已鎖定送出') : {
     active: '請完成本回合答案',
     reviewing: '已停止收件，等待老師公布結果',
@@ -98,8 +99,11 @@ export default function StudentRound({ session, credential, view, syncError = ''
     idle: '等待老師準備題目',
   }[view.phase];
   const labelFor = (id: string) => questionLabel(view.unit?.questions?.find(question => question.questionId === id) ?? { questionId: id });
-  return <section className="round-panel student-round"><h2 ref={receiptHeading} tabIndex={-1} aria-live="polite">{title}</h2>
+  return <section className={unanswered ? 'round-panel student-round unanswered-round' : 'round-panel student-round'}>
+    <h2 ref={receiptHeading} tabIndex={-1} aria-live="polite">{title}</h2>
     {syncError && <p className="error" role="status">{syncError}</p>}
+    {!view.received && view.phase === 'reviewing' && <p className="muted">本組尚未送出答案。結果公布後，可在這裡查看正確答案。</p>}
+    {unanswered && <p className="muted unanswered-round-summary">本回合已結束。</p>}
     {view.unit && view.phase !== 'preparing' && <>
       {view.phase === 'active' && !view.received && <>
         <div className="answer-list">{view.unit.questionIds.map(questionId => <label key={questionId}><strong>{labelFor(questionId)}</strong><span className="question-prompt">{view.unit?.questions?.find(question => question.questionId === questionId)?.prompt}</span><textarea rows={2} value={drafts.get(questionId) ?? ''} onChange={event => setDrafts(previous => new Map(previous).set(questionId, event.target.value))} /></label>)}</div>
@@ -108,22 +112,23 @@ export default function StudentRound({ session, credential, view, syncError = ''
         <button className="primary" disabled={busy || pending !== undefined || remainingMs > 0} onClick={() => void submit()}>{busy ? '送出中…' : pending !== undefined ? '等待收件確認…' : '送出本組答案'}</button></>}
       {(view.received || view.phase === 'reviewing') && view.unit.questions?.map(question =>
         <p className="question-prompt" key={question.questionId}><b>{questionLabel(question)}</b> {question.prompt}</p>)}
-      {view.received && <AnswerFeedback key={scope} {...{ view, session, credential, labelFor, onExpired }}
-        questionIds={view.unit.questionIds} />}
     </>}
+    {(unanswered || (view.received && view.unit && view.phase !== 'preparing')) &&
+      <AnswerFeedback key={scope} {...{ view, session, credential, labelFor, onExpired }} />}
   </section>;
 }
 
-function AnswerFeedback({ view, session, credential, labelFor, onExpired, questionIds }: {
+function AnswerFeedback({ view, session, credential, labelFor, onExpired }: {
   view: ActivityView; session: SessionResponse; credential: string; labelFor: (id: string) => string;
-  onExpired?: () => void; questionIds: string[];
+  onExpired?: () => void;
 }) {
   const [published, setPublished] = useState<StudentRoundResultLine[]>();
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const ended = view.phase === 'ended';
-  const roundId = ended && view.ownAnswers?.some(answer => answer.correct === false && !answer.publishedAnswer?.trim())
+  const roundId = ended && (!view.received || view.ownAnswers?.some(answer => answer.correct === false && !answer.publishedAnswer?.trim()))
     ? view.roundId : null;
+  const questionIds = view.unit?.questionIds ?? [];
 
   useEffect(() => {
     if (!roundId) return;
@@ -135,6 +140,25 @@ function AnswerFeedback({ view, session, credential, labelFor, onExpired, questi
       });
     return () => controller.abort();
   }, [roundId, session, credential, onExpired, retry]);
+
+  const loadError = roundId && error && <p className="error" role="alert">{error} <button className="secondary-button"
+    onClick={() => { setError(''); setRetry(value => value + 1); }}>重新載入</button></p>;
+
+  if (!view.received) return <div className="unanswered-results">
+    {published?.length ? <ul className="unanswered-results-list" role="list">
+      {published.map((row, index) => <li key={index}>
+        <h3>{questionLabel(row)}</h3>
+        {row.prompt && <p className="question-prompt">{row.prompt}</p>}
+        <p className="unanswered-reference"><strong>正確答案：</strong>{row.publishedAnswer?.trim() ? row.publishedAnswer : '未提供'}</p>
+      </li>)}
+    </ul> : <>
+      {view.unit?.questions?.map(question => <p className="question-prompt" key={question.questionId}>
+        <b>{questionLabel(question)}</b> {question.prompt}
+      </p>)}
+      {!error && <p className="muted" role="status">{roundId && !published ? '正在載入正確答案…' : '本回合沒有可顯示的正確答案。'}</p>}
+    </>}
+    {loadError}
+  </div>;
 
   return <div className="answer-feedback" aria-live="polite">
     {!ended && <p className="muted">本組答案已收件，請等待老師公布結果。</p>}
@@ -152,7 +176,6 @@ function AnswerFeedback({ view, session, credential, labelFor, onExpired, questi
         </p>}
       </div>;
     })}
-    {roundId && error && <p className="error">{error} <button className="secondary-button"
-      onClick={() => { setError(''); setRetry(value => value + 1); }}>重新載入</button></p>}
+    {loadError}
   </div>;
 }

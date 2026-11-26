@@ -65,6 +65,42 @@ describe('學生作答互動', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('本組未送出時，保留停收題目並於公布後逐題顯示正解', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(Response.json([
+        { questionNumber: 1, partNumber: 1, prompt: '第一部分題幹', ownAnswer: null, correct: null, publishedAnswer: '公布的正解' },
+        { questionNumber: 1, partNumber: 2, prompt: '第二部分題幹', ownAnswer: null, correct: null, publishedAnswer: null },
+      ]));
+    const view = { ...baseView, unit: { ...baseView.unit!, questions: [
+      { questionId: '1（1）', questionNumber: 1, partNumber: 1, prompt: '第一部分題幹', missingPrompt: false },
+      { questionId: '1（2）', questionNumber: 1, partNumber: 2, prompt: '第二部分題幹', missingPrompt: false },
+    ] } };
+    await mount(view);
+    const show = (nextView: ActivityView) => act(async () => root!.render(
+      <StudentRound session={session} credential="alpha" view={nextView} />,
+    ));
+    await show({ ...view, phase: 'reviewing' });
+    expect(host!.textContent).toContain('本組尚未送出答案');
+    expect(host!.textContent).toContain('第一部分題幹');
+    expect(host!.querySelector('textarea')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+
+    await show({ ...view, phase: 'ended', closedRoundIds: ['round-test'] });
+    expect(host!.querySelector('h2')?.textContent).toBe('本組未作答');
+    expect(host!.textContent).toContain('第一部分題幹');
+    expect(host!.querySelector('[role=alert]')?.textContent).toContain('無法載入正確答案');
+    await act(async () => host!.querySelector<HTMLButtonElement>('[role=alert] button')!.click());
+    const rows = [...host!.querySelectorAll('.unanswered-results li')];
+    expect(rows.map(row => row.querySelector('h3')?.textContent)).toEqual(['第 1 題，第 1 部分', '第 1 題，第 2 部分']);
+    expect(rows.map(row => row.querySelector('.unanswered-reference')?.textContent)).toEqual(['正確答案：公布的正解', '正確答案：未提供']);
+    expect(host!.textContent).not.toContain('錯誤');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await show({ ...view, roundId: 'next-round' });
+    expect(host!.textContent).not.toContain('公布的正解');
+    expect(host!.querySelectorAll('textarea')).toHaveLength(2);
+  });
+
   it('完整題組送出後顯示收件確認', async () => {
     let submitted = false, delivered = false, resumePoll: (() => void) | undefined;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

@@ -202,6 +202,16 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .answer-feedback > .answer-feedback-correct { color: #176136; background: #e9f7ef; }
 .answer-feedback > .answer-feedback-incorrect { color: #962032; background: #fff0f1; }
 .answer-feedback .answer-feedback-reference { margin-top: 8px; color: var(--work-ink); }
+.unanswered-round h2 { font-size: 1.25rem; font-weight: 750; }
+.unanswered-round-summary { margin-top: 4px; color: var(--work-muted); }
+.unanswered-results { margin-top: 18px; }
+.unanswered-results > .muted, .unanswered-results > .error { margin-top: 12px; }
+.unanswered-results-list > li { padding-block: 14px; border-top: 1px solid var(--work-line); }
+.unanswered-results-list > li:last-child { padding-bottom: 0; }
+.unanswered-results-list h3 { font-weight: 700; }
+.unanswered-results-list .question-prompt { margin-top: 4px; color: var(--work-muted); }
+.unanswered-reference { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.unanswered-results .secondary-button { min-height: 44px; margin-block-start: 4px; }
 .join-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-block: 6px; }
 .join-code-row .join-code {
   max-width: 100%;
