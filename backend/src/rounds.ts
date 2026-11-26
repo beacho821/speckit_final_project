@@ -119,10 +119,13 @@ export function endRound(activity: Activity, roundId: string): Round {
   const round = activity.rounds.find(item => item.id === roundId);
   if (!round || currentRound(activity)?.id !== roundId) throw new DomainError(409, 'ROUND_EXPIRED', '回合已更新，請重新載入教師畫面。');
   if (round.phase !== 'active') throw new DomainError(409, 'INVALID_PHASE', '只有進行中的回合可以結束。');
-  const accepted = new Map(round.questions?.map(question => [question.questionId, new Set(question.acceptedAnswers)]));
+  const accepted = new Map(round.questions?.map(question => [
+    question.questionId,
+    new Set(question.acceptedAnswers.map(answer => answer.toLowerCase())),
+  ]));
   for (const submission of round.submissions) {
     for (const answer of submission.answers) {
-      answer.autoCorrect = accepted.get(answer.questionId)?.has(answer.text.trim()) ?? false;
+      answer.autoCorrect = accepted.get(answer.questionId)?.has(answer.text.trim().toLowerCase()) ?? false;
     }
   }
   round.phase = 'reviewing';

@@ -40,6 +40,28 @@ describe('回合與整組收件', () => {
   });
 });
 
+it.each([
+  ['CPU', ' cPu ', true],
+  ['維生素C', '維生素c', true],
+  ['維生素C', '維生素Ｃ', false],
+  ['維生素 C。', '維生素c', false],
+  ['中央處理器', '中央處理器', true],
+  ['中央處理器', '中央處理機', false],
+])('自動判分比對 %s 與 %s，預期為 %s，並保留原文', (standard, text, correct) => {
+  const { activity, round } = setup();
+  configureWorksheet(activity, id => id.endsWith('1）') ? ['其他答案', standard] : ['乙']);
+  startRound(activity, round.id, 0);
+  const submission = submitAnswers(activity, round.id, 'a', [
+    { questionId: '1（1）', text },
+    { questionId: '1（2）', text: '乙' },
+  ], 0);
+
+  endRound(activity, round.id);
+
+  expect(submission.answers[0]).toMatchObject({ text, autoCorrect: correct });
+  expect(round.questions?.[0].acceptedAnswers).toEqual(['其他答案', standard]);
+});
+
 it('兩組分別答對不同子題時，兩題都無須補答，且整個題組無勝組', () => {
   const { activity, round } = setup();
   startRound(activity, round.id, 0);
