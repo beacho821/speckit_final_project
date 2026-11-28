@@ -2,14 +2,14 @@ import { expect, it } from 'vitest';
 import { classroom } from '../helpers/classroom';
 import { worksheet } from '../helpers/worksheet';
 
-it('手動加題由伺服器產生識別，答案選填，空白題幹及學生越權遭拒', async () => {
+it('手動加題由伺服器產生識別，空白題幹、答案及學生越權遭拒', async () => {
   const c = await classroom();
   try {
     const group = await c.group();
     const student = await c.student(group.joinCode);
     const add = (acceptedAnswersText: string, prompt: string, headers = c.teacher) => c.request('/questions', headers, { acceptedAnswersText, prompt }, 'POST');
     expect((await add('答案', ' ')).status).toBe(422);
-    expect((await add(43 as unknown as string, '完整題目')).status).toBe(422);
+    expect((await add(' ', '完整題目')).status).toBe(422);
     expect((await add('答案', '完整題目', student.headers)).status).toBe(403);
     const added = await add('答案', '完整題目');
     expect(added.status).toBe(201);
@@ -84,7 +84,7 @@ it('純手動回合自動判分、改判及補答可公布，CSV 保留一筆補
     expect(c.activity.rounds[0]).toEqual(saved);
     expect((await (await c.request('/view',students[0].headers)).json()).version).toBe(studentReview.version);
     expect(studentReview.review).toBeUndefined();
-    expect(await (await post('/publish',{reviewRevision:1,supplements:[{questionId:question.questionId,text:'測試標準甲'}]})).json()).toMatchObject({phase:'ended',winnerGroupId:null});
+    expect(await (await post('/publish',{reviewRevision:1})).json()).toMatchObject({phase:'ended',winnerGroupId:null});
     const sealed = structuredClone(c.activity.rounds[0]);
     for (const [body, status, code] of [
       [{}, 422, 'INVALID_REVIEW_REVISION'],
@@ -150,7 +150,7 @@ it('整卡更新一次提交所有部分，拒絕無效部分且保留所有版�
     );
     expect((await patch(questions, student.headers)).status).toBe(403);
     for (const parts of [questions.slice(1), [questions[0], questions[0]],
-      questions.map((part, i) => i === 1 ? { ...part, acceptedAnswersText: 23 } : part)]) {
+      questions.map((part, i) => i === 1 ? { ...part, acceptedAnswersText: ' ' } : part)]) {
       expect((await patch(parts)).status).toBe(422);
       expect(c.activity.units.find(item => item.id === unit.id)).toEqual(initial);
       expect(c.activity.catalogRevision).toBe(catalogRevision);

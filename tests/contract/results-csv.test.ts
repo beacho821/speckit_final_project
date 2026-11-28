@@ -1,7 +1,7 @@
 import { configureWorksheet, finishRound } from '../helpers/worksheet.js';
 import { describe, expect, it } from 'vitest';
 import { createActivity } from '../../backend/src/activity.js';
-import { prepareRound, startRound, submitAnswers, endRound, publishRound, reviewFor } from '../../backend/src/rounds.js';
+import { prepareRound, startRound, submitAnswers } from '../../backend/src/rounds.js';
 import { buildResultsCsv } from '../../backend/src/results-csv.js';
 import type { FillBlank } from '../../shared/api.js';
 
@@ -30,11 +30,7 @@ describe('結果 CSV', () => {
     const fills: FillBlank[] = Array.from({ length: 5 }, (_, index) => ({ id: `f${index + 1}`, questionId: String(index + 1), mainQuestionId: String(index + 1), unitId: `u${index + 1}`, row: index + 1, column: 2, originalValue: '', originalType: 'blank', identitySource: 'header' }));
     activity.worksheet = { source: { kind: 'google', documentId: 'test', sheetId: 1, sheetTitle: '五題', importedAt: 0 }, fills, units: fills.map((fill, index) => ({ id: `u${index + 1}`, name: fill.questionId, questionIds: [fill.questionId], fillBlankIds: [fill.id] })) };
     configureWorksheet(activity);
-    for (const unit of activity.worksheet.units) {
-      const round = prepareRound(activity, unit.id);
-      startRound(activity, round.id, 0); endRound(activity, round.id);
-      publishRound(activity, round.id, 0, reviewFor(round).supplements);
-    }
+    for (const unit of activity.worksheet.units) { const round = prepareRound(activity, unit.id); startRound(activity, round.id, 0); finishRound(activity, round.id); }
     const lines = buildResultsCsv(activity).split('\r\n').filter(Boolean);
     expect(lines).toHaveLength(21);
     expect(lines.filter(line => line.endsWith(',,,未送出,'))).toHaveLength(15);

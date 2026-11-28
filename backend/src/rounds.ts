@@ -52,8 +52,14 @@ export function startRound(activity: Activity, roundId: string, now = performanc
   const unit = activity.units.find(candidate => candidate.id === round.unitId);
   if (!unit) throw new DomainError(404, 'UNIT_NOT_FOUND', '找不到所選題目，請重新選擇。');
   const missingPromptQuestionIds = unit.questions.filter(question => question.missingPrompt).map(question => question.questionId);
-  if (missingPromptQuestionIds.length) throw new DomainError(422, 'QUESTION_NOT_READY', '請補填題目：' + missingPromptQuestionIds.join('、') + '，儲存後再開始搶答。', { missingPromptQuestionIds, missingAcceptedAnswerQuestionIds: [] });
-  round.optionalSupplements = true;
+  const missingAcceptedAnswerQuestionIds = unit.questions.filter(question => !question.acceptedAnswers.length).map(question => question.questionId);
+  if (missingPromptQuestionIds.length || missingAcceptedAnswerQuestionIds.length) {
+    const missing = [
+      missingPromptQuestionIds.length ? `請補填題目：${missingPromptQuestionIds.join('、')}` : '',
+      missingAcceptedAnswerQuestionIds.length ? `請填寫標準答案：${missingAcceptedAnswerQuestionIds.join('、')}` : '',
+    ].filter(Boolean);
+    throw new DomainError(422, 'QUESTION_NOT_READY', `${missing.join('。')}，儲存後再開始搶答。`, { missingPromptQuestionIds, missingAcceptedAnswerQuestionIds });
+  }
   round.questions = structuredClone(unit.questions);
   round.sequenceNumber = activity.rounds.filter(entry => entry.phase !== 'preparing').length + 1;
   round.isMultipart = multipart(round.questions, activity.worksheet);
@@ -67,22 +73,18 @@ export function startRound(activity: Activity, roundId: string, now = performanc
   return round;
 }
 
-export function requireSubmissionTime(round: Round, groupId: string, receivedAt: number) {
-  const openAt = round.openAtByGroup[groupId];
-  if (openAt === undefined) throw new DomainError(403, 'GROUP_NOT_IN_ROSTER', '本回合未包含此組別，請聯絡老師。');
-  if (receivedAt < openAt) {
-    const waitRemainingMs = Math.ceil(openAt - receivedAt);
-    throw new DomainError(409, 'WAIT_REQUIRED', '本組尚須等待冷卻結束才能送出，答案草稿已保留。', { waitRemainingMs });
-  }
-}
-
 export function submitAnswers(activity: Activity, roundId: string, groupId: string, input: unknown, now = performance.now()): Submission {
   const round = activity.rounds.find(item => item.id === roundId);
   if (!round || currentRound(activity)?.id !== roundId) throw new DomainError(409, 'ROUND_EXPIRED', '此回合已更新，請查看目前題目。');
   if (round.phase !== 'active') throw new DomainError(409, 'INVALID_PHASE', '回合尚未開放或已停止收件，答案沒有送出。');
   if (!round.roster.some(group => group.id === groupId)) throw new DomainError(403, 'GROUP_NOT_IN_ROSTER', '此組別不在本回合名單中，請聯絡老師。');
   if (round.submissions.some(submission => submission.groupId === groupId)) throw new DomainError(409, 'ALREADY_RECEIVED', '本組答案已收件，無法重複送出。');
-  requireSubmissionTime(round, groupId, now);
+  const openAt = round.openAtByGroup[groupId];
+  if (openAt === undefined) throw new DomainError(403, 'GROUP_NOT_IN_ROSTER', '本回合未包含此組別，請聯絡老師。');
+  if (now < openAt) {
+    const remainingMs = Math.max(0, Math.ceil(openAt - now));
+    throw new DomainError(409, 'WAIT_REQUIRED', `本組尚須等待 ${remainingMs} 毫秒才能送出，答案草稿已保留。`, { waitRemainingMs: remainingMs });
+  }
   if (!Array.isArray(input)) throw new DomainError(422, 'INVALID_ANSWERS', '答案格式不正確，請填妥所有題目後一起送出。');
   const questions = round.questions;
   if (!questions) throw new DomainError(500, 'UNIT_MISSING', '找不到本回合題目資料，請聯絡老師。');
@@ -123,8 +125,7 @@ export function endRound(activity: Activity, roundId: string): Round {
   ]));
   for (const submission of round.submissions) {
     for (const answer of submission.answers) {
-      const standards = accepted.get(answer.questionId);
-      answer.autoCorrect = standards?.size ? standards.has(answer.text.trim().toLowerCase()) : undefined;
+      answer.autoCorrect = accepted.get(answer.questionId)?.has(answer.text.trim().toLowerCase()) ?? false;
     }
   }
   round.phase = 'reviewing';
@@ -153,7 +154,6 @@ export function reviewFor(round: Round): ReviewView {
   const { selected, missingSupplementQuestionIds } = selectReviewSupplements(questions, correctIds, candidates);
   return {
     reviewRevision: round.reviewRevision ?? 0,
-    optionalSupplements: round.optionalSupplements,
     supplementCandidates: candidates,
     missingSupplementQuestionIds,
     supplements: selected.map(({ questionId, text }) => ({ questionId, text })),
@@ -181,7 +181,7 @@ export function updateReview(activity: Activity, roundId: string, input: unknown
   const { reviewRevision, grades = [], supplements = [], eligibility = [] } = (input ?? {}) as Record<string, unknown>;
   requireCurrentReview(activity, round, reviewRevision);
   if (!Array.isArray(supplements) || supplements.length) {
-    throw new DomainError(422, 'INVALID_SUPPLEMENT', '請在定案時確認補答，判分儲存只接受判定與資格。');
+    throw new DomainError(422, 'INVALID_SUPPLEMENT', '補答已自動處理，請重新載入審核畫面後儲存判分。');
   }
   if (!Array.isArray(grades) || !Array.isArray(eligibility) || (!grades.length && !eligibility.length)) {
     throw new DomainError(422, 'INVALID_REVIEW', '請選擇要更正的判分或組別資格。');
@@ -224,25 +224,14 @@ export function updateReview(activity: Activity, roundId: string, input: unknown
   return reviewFor(round);
 }
 
-export function publishRound(activity: Activity, roundId: string, revision: unknown, choices?: unknown) {
+export function publishRound(activity: Activity, roundId: string, revision: unknown) {
   const round = activity.rounds.find(item => item.id === roundId);
   if (round?.phase === 'ended') {
     requireReviewRevision(round, revision);
     return { id: round.id, phase: round.phase, winnerGroupId: round.winnerGroupId ?? null };
   }
   requireCurrentReview(activity, round, revision);
-  if (round.submissions.some(group => !group.disqualified && group.answers.some(answer => finalCorrectness(answer) === undefined))) {
-    throw new DomainError(422, 'GRADING_REQUIRED', '尚有未判分的作答，請逐筆判定正確或錯誤後儲存。');
-  }
-  const review = reviewFor(round);
-  if (round.optionalSupplements) {
-    const allowed = new Set([...review.supplements.map(item => item.questionId), ...review.missingSupplementQuestionIds]);
-    const selected = choices === undefined ? [] : choices;
-    if (!Array.isArray(selected) || selected.some(item => !item || !allowed.delete(item.questionId) || typeof item.text !== 'string' || !item.text.trim() || item.text.length > 4000)) {
-      throw new DomainError(422, 'INVALID_SUPPLEMENT', '請只為無人答對的小題填寫一筆有效補答（最多 4000 字）。');
-    }
-    round.supplements = selected.map(({ questionId, text }) => ({ questionId, text }));
-  } else round.supplements = review.supplements;
+  round.supplements = reviewFor(round).supplements;
   round.winnerGroupId = round.submissions.find(submission =>
     !submission.disqualified && submission.answers.length === round.questions?.length && submission.answers.every(answer => finalCorrectness(answer) === true),
   )?.groupId;
@@ -262,7 +251,6 @@ export function publishSettlement(activity: Activity) {
   }
   if (!activity.settlementPublished) {
     activity.settlementPublished = true;
-    activity.settlementGroupCount = activity.groups.length;
     changed(activity);
     projectionChanged(activity);
   }

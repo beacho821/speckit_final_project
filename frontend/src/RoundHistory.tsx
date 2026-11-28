@@ -29,7 +29,7 @@ export function StudentHistory({ session, credential, roundIds, snapshot, onExpi
     return () => controller.abort();
   }, [roundKey, session, credential, snapshot, retry, onExpired]);
 
-  return <section className={session.role === 'student' ? 'student-history student-round' : 'student-history'}>
+  return <section className="student-history">
     <h2>歷史紀錄</h2>
     {error && <p className="error" role="alert">{error} <button className="secondary-button" onClick={() => setRetry(value => value + 1)}>重新載入</button></p>}
     {roundIds.length === 0 ? <p className="muted">目前還沒有公布的答案。</p> :

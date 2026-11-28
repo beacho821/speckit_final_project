@@ -1,6 +1,6 @@
 export type SessionResponse =
   | { activityId: string; classroomId?: string; activityEpoch?: string; role: 'teacher'; groupId?: never; groupName?: never; memberId?: never; studentName?: never }
-  | { activityId: string; classroomId?: string; activityEpoch?: string; classroomName?: string; role: 'student'; groupId: string; groupName: string; memberId: string; studentName: string; memberCredential?: string };
+  | { activityId: string; classroomId?: string; activityEpoch?: string; classroomName?: string; role: 'student'; groupId: string; groupName: string; memberId: string; studentName: string };
 
 
 export interface GroupSummary { id: string; name: string }
@@ -19,7 +19,6 @@ export interface FillBlank {
   unitId: string;
   row: number;
   column: number;
-  subLabelColumn?: number;
   originalValue: unknown;
   originalType: string;
   note?: string;
@@ -28,7 +27,7 @@ export interface FillBlank {
 }
 export interface BuzzerUnit { id: string; name: string; questionIds: string[]; fillBlankIds: string[] }
 export type WorksheetSource = { kind: 'google'; documentId: string; sheetId: number; sheetTitle: string; importedAt: number } | { kind: 'xlsx'; fileName: string; sheetId: number; sheetTitle: string; importedAt: number };
-export interface Worksheet { originalDigest?: string; source: WorksheetSource; fills: FillBlank[]; units: BuzzerUnit[] }
+export interface Worksheet { source: WorksheetSource; fills: FillBlank[]; units: BuzzerUnit[] }
 export interface QuestionPreview { questionId: string; prompt: string | null; missingPrompt: boolean; questionNumber?: number; partNumber?: number | null }
 export interface RoundQuestion extends QuestionPreview {
   questionKey: string;
@@ -64,14 +63,12 @@ export interface GradeEdit { groupId: string; questionId: string; correct: boole
 export interface TeacherSupplement { questionId: string; text: string }
 export interface SupplementCandidate extends TeacherSupplement { source: 'legacy' | 'configured' }
 export interface ReviewView {
-  optionalSupplements?: boolean;
   reviewRevision: number;
   supplementCandidates: SupplementCandidate[];
   missingSupplementQuestionIds: string[];
   supplements: TeacherSupplement[];
 }
 export interface Round {
-  optionalSupplements?: boolean;
   id: string;
   unitId: string;
   unitName?: string;
@@ -100,7 +97,7 @@ export interface ActivityView {
   availableUnits?: Array<{ unitId: string; questionIds: string[]; questions?: QuestionPreview[] }>;
   editableQuestions?: RoundQuestion[];
   review?: ReviewView;
-  groups?: Array<{ id: string; name: string; received: boolean; waitRemainingMs?: number; disqualified?: boolean; rank?: number; answers?: Array<{ questionId: string; text: string; autoCorrect?: boolean; correct?: boolean }> }>;
+  groups?: Array<{ id: string; name: string; received: boolean; disqualified?: boolean; rank?: number; answers?: Array<{ questionId: string; text: string; autoCorrect?: boolean; correct?: boolean }> }>;
   groupId?: string;
   groupName?: string;
   rosterVersion?: number;
@@ -110,7 +107,6 @@ export interface ActivityView {
   standings?: GroupStanding[];
   settlement?: ActivitySettlement;
   waitRemainingMs?: number;
-  cooldownMs?: number;
   version: number;
 }
 export interface StudentRoundResultLine {
@@ -168,7 +164,7 @@ export interface ProjectionView {
   phase: ActivityView['phase'];
   title?: string;
   questions: Array<QuestionPreview & { publishedAnswer?: string }>;
-  groups: Array<{ id: string; name: string; received: boolean; waitRemainingMs?: number }>;
+  groups: Array<{ id: string; name: string; received: boolean }>;
   winnerGroupName?: string;
   standings?: GroupStanding[];
   settlement?: ActivitySettlement;

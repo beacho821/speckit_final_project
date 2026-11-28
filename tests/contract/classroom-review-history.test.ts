@@ -24,7 +24,7 @@ it('取消資格會重算補答和勝組，原始收件順位仍可查', async (
     expect((await c.request(path + '/results', c.teacher)).status).toBe(403);
     expect(await (await edit(1, false)).json()).toMatchObject({ missingSupplementQuestionIds: [] });
     await edit(2, true);
-    expect((await c.request(path + "/publish", c.teacher, { reviewRevision: 3, supplements: [{ questionId: added.questionId, text: "答案" }] }, "POST")).status).toBe(200);
+    await c.publishReviewedRound(round.id);
     const result = await (await c.request(path + '/results')).json();
     expect(result[0]).toMatchObject({ winnerGroupId: null, teacherAnswer: '答案', groups: [{ rank: 1, status: '已取消資格', answer: '答案' }] });
   } finally { await c.close(); }

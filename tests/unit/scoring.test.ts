@@ -18,7 +18,7 @@ it('依定案正誤、有效資格及收件順位計算單題與題組積分', (
       round,
       submit(groupId: string, ...answers: string[]) {
         submitAnswers(activity, round.id, groupId, questions.map(({ questionId }, index) =>
-          ({ questionId, text: answers[index] })), round.openAtByGroup[groupId]);
+          ({ questionId, text: answers[index] })), 3000);
       },
     };
   }

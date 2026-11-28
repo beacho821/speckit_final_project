@@ -1,9 +1,6 @@
-import AnswerSuggestions, { fillBlankAnswer } from './AnswerSuggestions';
-import type { SessionResponse } from '../../shared/api';
 import { useId, useRef, useState, type FormEvent } from 'react';
 
-export default function ManualQuestion({ disabled, onAdd, error, session, credential }: {
-  session?: SessionResponse; credential?: string;
+export default function ManualQuestion({ disabled, onAdd, error }: {
   disabled: boolean;
   onAdd: (prompt: string, acceptedAnswersText: string) => Promise<boolean>;
   error?: string;
@@ -25,7 +22,7 @@ export default function ManualQuestion({ disabled, onAdd, error, session, creden
   async function submit(event: FormEvent) {
     event.preventDefault();
     setAttempted(true);
-    if (disabled || saving || !prompt.trim()) {
+    if (disabled || saving || !prompt.trim() || !answers.trim()) {
       const field = event.currentTarget.querySelector<HTMLTextAreaElement>(!prompt.trim() ? '[name="prompt"]' : '[name="answers"]');
       field?.focus();
       return;
@@ -46,12 +43,9 @@ export default function ManualQuestion({ disabled, onAdd, error, session, creden
         <label>題幹<textarea name="prompt" autoFocus required rows={3} value={prompt} aria-invalid={attempted && !prompt.trim()}
           onChange={event => setPrompt(event.target.value)} /></label>
         {attempted && !prompt.trim() && <p className="error" role="alert">請填寫題幹。</p>}
-        {session && credential && <AnswerSuggestions {...{ session, credential }} disabled={disabled || saving}
-          targets={[{ id: 'manual', label: '新增題目', prompt, text: answers }]}
-          onAccept={suggestions => setAnswers(previous => fillBlankAnswer(suggestions, 'manual', prompt, previous))} />}
-        <label>標準答案（選填，一行一種答案）<textarea name="answers" rows={3} value={answers}
+        <label>標準答案（一行一種答案）<textarea name="answers" required rows={3} value={answers} aria-invalid={attempted && !answers.trim()}
           onChange={event => setAnswers(event.target.value)} /></label>
-
+        {attempted && !answers.trim() && <p className="error" role="alert">請填寫至少一個標準答案。</p>}
         {failed && <p className="error" role="alert">{error || '題目未能儲存，請核對目前資料後再試。'}</p>}
         <div className="row-actions">
           <button type="button" className="secondary-button" disabled={saving} onClick={() => dialog.current?.close()}>取消</button>

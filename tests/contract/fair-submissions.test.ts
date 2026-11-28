@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { classroom } from '../helpers/classroom.js';
 import { worksheet as seed } from '../helpers/worksheet.js';
 
@@ -22,7 +22,7 @@ function fairnessWorksheet() {
 const answers = (unit: { questionIds: string[] }) => unit.questionIds.map(questionId => ({ questionId, text: `${questionId}答案` }));
 
 describe('公平送出 HTTP 契約', () => {
-  it('曾勝組於 7,999 毫秒被拒、8,000 毫秒可送；客戶端時間不影響順位', async () => {
+  it('曾勝組於 2,999 毫秒被拒、3,000 毫秒可送；客戶端時間不影響順位', async () => {
     let now = 100;
     const c = await classroom({ now: () => now, importWorksheet: async () => ({ worksheet: fairnessWorksheet() }) });
     try {
@@ -40,31 +40,24 @@ describe('公平送出 HTTP 契約', () => {
       const secondRound = await (await c.request('/rounds', c.teacher, { unitId: secondUnit.id }, 'POST')).json();
       await c.startConfiguredRound(secondRound.id, questionId => `${questionId}答案`);
       const waiting = await (await c.request('/view', alphaStudent.headers)).json();
-      expect(waiting.waitRemainingMs).toBe(8000);
-      expect(waiting.cooldownMs).toBe(8000);
+      expect(waiting.waitRemainingMs).toBe(3000);
       expect(waiting.groups).toBeUndefined();
-      expect(await (await c.request('/view', betaStudent.headers)).json()).toMatchObject({ waitRemainingMs: 0, cooldownMs: 0 });
+      expect(await (await c.request('/view', betaStudent.headers)).json()).toMatchObject({ waitRemainingMs: 0 });
 
-      now = 8499;
-      // 模擬請求到達時仍在冷卻，輪到教室寫入時剛好已經期滿。
-      const mutate = c.classrooms.mutate.bind(c.classrooms);
-      const queue = vi.spyOn(c.classrooms, 'mutate').mockImplementation((room, activity, change) => {
-        now = 8500;
-        return mutate(room, activity, change);
-      });
+      now = 3499;
       const tooEarly = await c.request(`/rounds/${secondRound.id}/submissions`, alphaStudent.headers, { answers: answers(secondUnit), receivedAt: Number.MAX_SAFE_INTEGER }, 'POST');
       expect(tooEarly.status).toBe(409);
       expect((await tooEarly.json()).details.waitRemainingMs).toBe(1);
       expect(c.activity.rounds[1].submissions).toHaveLength(0);
 
+      now = 3500;
       const betaSubmission = await c.request(`/rounds/${secondRound.id}/submissions`, betaStudent.headers, { answers: answers(secondUnit), receivedAt: 0 }, 'POST');
-      queue.mockRestore();
       expect(betaSubmission.status).toBe(201);
-      now = 8500;
+      now = 3500;
       const alphaSubmission = await c.request(`/rounds/${secondRound.id}/submissions`, alphaStudent.headers, { answers: answers(secondUnit), receivedAt: 0 }, 'POST');
       expect(alphaSubmission.status).toBe(201);
       expect(c.activity.rounds[1].submissions.map(item => item.rank)).toEqual([1, 2]);
-      expect(c.activity.rounds[1].submissions.map(item => item.receivedAt)).toEqual([8499, 8500]);
+      expect(c.activity.rounds[1].submissions.map(item => item.receivedAt)).toEqual([3500, 3500]);
       await c.finishRound(secondRound.id);
       const thirdUnit = c.activity.worksheet!.units[2];
       const thirdRound = await (await c.request('/rounds', c.teacher, { unitId: thirdUnit.id }, 'POST')).json();
@@ -76,7 +69,7 @@ describe('公平送出 HTTP 契約', () => {
     } finally { await c.close(); }
   });
 
-  it('兩組輪流得標後分別等待 3.45 與 5.75 秒，教師和投影顯示相同倒數', async () => {
+  it('各組都曾勝出時立即開放，並發有效送出仍取得唯一順位', async () => {
     let now = 100;
     const c = await classroom({ now: () => now, importWorksheet: async () => ({ worksheet: fairnessWorksheet() }) });
     try {
@@ -94,17 +87,7 @@ describe('公平送出 HTTP 契約', () => {
       const unit = c.activity.worksheet!.units[2];
       const round = await (await c.request('/rounds', c.teacher, { unitId: unit.id }, 'POST')).json();
       await c.startConfiguredRound(round.id, questionId => `${questionId}答案`);
-      expect(await (await c.request('/view', a.headers)).json()).toMatchObject({ waitRemainingMs: 3450 });
-      expect(await (await c.request('/view', b.headers)).json()).toMatchObject({ waitRemainingMs: 5750 });
-      now += 3449;
-      const early = await c.request(`/rounds/${round.id}/submissions`, a.headers, { answers: answers(unit) }, 'POST');
-      expect(await early.json()).toMatchObject({ code: 'WAIT_REQUIRED', details: { waitRemainingMs: 1 } });
-      for (const path of ['/view', '/classrooms/' + c.room.id + '/projection']) {
-        expect((await (await c.request(path)).json()).groups).toMatchObject([
-          { id: alpha.id, waitRemainingMs: 1 }, { id: beta.id, waitRemainingMs: 2301 },
-        ]);
-      }
-      now += 2301;
+      expect(await (await c.request('/view', a.headers)).json()).toMatchObject({ waitRemainingMs: 0 });
       const responses = await Promise.all([
         c.request(`/rounds/${round.id}/submissions`, a.headers, { answers: answers(unit) }, 'POST'),
         c.request(`/rounds/${round.id}/submissions`, b.headers, { answers: answers(unit) }, 'POST'),

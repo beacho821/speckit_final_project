@@ -33,7 +33,7 @@ describe('Google 原稿身分回填整合', () => {
     for (const [index, unit] of targetUnits.entries()) {
       const round = prepareRound(activity, unit.id);
       startRound(activity, round.id, index * 100);
-      submitAnswers(activity, round.id, group.id, unit.questionIds.map((questionId, answerIndex) => ({ questionId, text: index === 0 && answerIndex === 0 ? '答案：原有標記／1' : `勝組答案-${questionId}` })), round.openAtByGroup[group.id]);
+      submitAnswers(activity, round.id, group.id, unit.questionIds.map((questionId, answerIndex) => ({ questionId, text: index === 0 && answerIndex === 0 ? '答案：原有標記／1' : `勝組答案-${questionId}` })), index * 100);
       ended.push(finishRound(activity, round.id));
     }
 
@@ -112,7 +112,7 @@ describe('Google 原稿身分回填整合', () => {
     const ended = [];
     for (const [index, unit] of source.units.entries()) {
       const round = prepareRound(activity, unit.id); startRound(activity, round.id, index * 100);
-      submitAnswers(activity, round.id, group.id, unit.questionIds.map(questionId => ({ questionId, text: `答案-${questionId}` })), round.openAtByGroup[group.id]);
+      submitAnswers(activity, round.id, group.id, unit.questionIds.map(questionId => ({ questionId, text: `答案-${questionId}` })), index * 100);
       ended.push(finishRound(activity, round.id));
     }
     const currentFixture = await makeMixedWorksheet();

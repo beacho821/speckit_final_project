@@ -1,11 +1,8 @@
 import { configureWorksheet, finishRound } from '../helpers/worksheet.js';
 import { describe, expect, it } from 'vitest';
-import ExcelJS from 'exceljs';
 import { createActivity } from '../../backend/src/activity.js';
 import { prepareRound, startRound, submitAnswers } from '../../backend/src/rounds.js';
-import { exportXlsx, planWriteback } from '../../backend/src/worksheet/writeback.js';
-import { importXlsxWorksheet } from '../../backend/src/worksheet/xlsx-source.js';
-import { reference } from '../fixtures/xlsx-variants.js';
+import { planWriteback } from '../../backend/src/worksheet/writeback.js';
 import type { FillBlank, Worksheet } from '../../shared/api.js';
 
 function completedActivity() {
@@ -20,44 +17,6 @@ function completedActivity() {
 }
 
 describe('原稿回填計畫', () => {
-  it('舊活動可匯出到獨立的小題答案格，保留編號與合併格，並檢查新位置的編輯衝突', async () => {
-    const bytes = await reference('mixed');
-    const { worksheet } = await importXlsxWorksheet(bytes, '混合題.xlsx');
-    const activity = createActivity();
-    activity.worksheet = structuredClone(worksheet!);
-    for (const fill of activity.worksheet.fills) {
-      if (!fill.subLabelColumn) continue;
-      fill.column = fill.subLabelColumn;
-      delete fill.subLabelColumn;
-      fill.originalValue = '（' + fill.subQuestionId + '）';
-      fill.originalType = 'string';
-    }
-    activity.groups = [{ id: 'a', name: '甲組' }];
-    configureWorksheet(activity, id => ['回填' + id]);
-    for (const unit of activity.worksheet.units) {
-      const round = prepareRound(activity, unit.id);
-      startRound(activity, round.id);
-      const answers = unit.questionIds.map(id => ({ questionId: id, text: '回填' + id }));
-      submitAnswers(activity, round.id, 'a', answers, round.openAtByGroup.a);
-      finishRound(activity, round.id);
-    }
-    const book = new ExcelJS.Workbook();
-    await book.xlsx.load(await exportXlsx(activity, bytes) as never);
-    const sheet = book.worksheets[0];
-    for (const fill of worksheet!.fills) {
-      const target = sheet.getCell(fill.row, fill.column);
-      expect(target.value).toBe('回填' + fill.questionId);
-      if (fill.subQuestionId) {
-        expect(sheet.getCell(fill.row, 7).text).toMatch(new RegExp('[（(]' + fill.subQuestionId + '[）)]'));
-      } else {
-        expect(sheet.getCell(fill.row, 8).master.address).toBe(target.address);
-      }
-    }
-    const first = worksheet!.fills[0];
-    first.originalValue = '教師後來填入的答案';
-    first.originalType = 'string';
-    expect(() => planWriteback(activity, worksheet!)).toThrow('來源工作表已有變動');
-  });
   it('以題號重辨移位後的格子，並保留有勝組原文', () => {
     const activity = completedActivity();
     const current: Worksheet = { ...activity.worksheet!, fills: activity.worksheet!.fills.map((fill, index) => ({ ...fill, row: 10 + index, column: 6 })) };

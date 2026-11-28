@@ -8,73 +8,22 @@ import TeacherResults, { useTeacherWriteback } from './TeacherResults';
 import Roster from './Roster';
 import Settlement from './Settlement';
 import WorksheetImport from './WorksheetImport';
-import { ClassroomIcon } from './ClassroomIcon';
 
 const rootPath = '/teacher/classrooms';
 type Area = 'settings' | 'groups' | 'console';
 const areaNames: Record<Area, string> = { groups: '分組管理', settings: '題目管理', console: '老師控制台' };
-const areas = Object.keys(areaNames) as Area[];
 
-export default function TeacherPortal({ master, displayName = '教師', credential, path, navigate, logout, openProjection }: {
-  master?: boolean; displayName?: string; credential: string; path: string; navigate: (path: string) => void;
+export default function TeacherPortal({ credential, path, navigate, logout, openProjection }: {
+  credential: string; path: string; navigate: (path: string) => void;
   logout: () => void; openProjection: (room: ClassroomLocation) => boolean;
 }) {
   const id = path.match(/^\/teacher\/classrooms\/([^/]+)(?:\/(groups|console))?$/);
   return <main className="teacher-shell">
-    <header className="teacher-bar"><a className="workspace-brand" href={rootPath} onClick={event => { event.preventDefault(); navigate(rootPath); }}><span className="bell-tile"><ClassroomIcon name="bell" /></span>課堂活動</a>
-      <button className="quiet icon-label" onClick={logout}><ClassroomIcon name="exit" />登出</button></header>
+    <header className="teacher-bar"><a href={rootPath} onClick={event => { event.preventDefault(); navigate(rootPath); }}>課堂活動</a>
+      <button className="quiet" onClick={logout}>登出</button></header>
     {id ? <SelectedRoom key={id[1]} id={id[1]} area={(id[2] as Area | undefined) ?? 'settings'} {...{ credential, navigate, logout, openProjection }} />
       : <ClassroomList credential={credential} onOpen={roomId => navigate(rootPath + '/' + roomId + '/groups')} onExpired={logout} />}
-    <AccountSettings master={Boolean(master)} {...{ displayName, credential, logout }} />
   </main>;
-}
-
-function AccountSettings({ master, displayName, credential, logout }: { master: boolean; displayName: string; credential: string; logout: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
-  const [message, setMessage] = useState('');
-  const [busy, setBusy] = useState(false);
-  return <>
-    <button ref={trigger} type="button" className="teacher-profile" aria-haspopup="dialog" aria-label={displayName + '，教師帳號設定'}
-      onClick={() => dialog.current?.showModal()}>
-      <span className="teacher-avatar" aria-hidden="true">{Array.from(displayName)[0]}</span>
-      <span className="teacher-profile-name">{displayName}</span>
-      <span aria-hidden="true">▴</span>
-    </button>
-    <dialog ref={dialog} className="work-dialog teacher-account-dialog" aria-labelledby="account-title"
-      onCancel={event => { if (busy) event.preventDefault(); }}
-      onClose={() => { formRef.current?.reset(); setMessage(''); trigger.current?.focus(); }}>
-    <header><div><h2 id="account-title">教師帳號設定</h2><span className="muted">{displayName}</span></div>
-      <button type="button" className="quiet" disabled={busy} onClick={() => dialog.current?.close()}>關閉</button>
-    </header>
-    <form ref={formRef} className="form-stack" onSubmit={async event => {
-      event.preventDefault();
-      if (busy) return;
-      const form = event.currentTarget;
-      const fields = new FormData(form);
-      setBusy(true); setMessage('');
-      try {
-        const response = await fetch(master ? '/api/teachers' : '/api/teachers/me/password', {
-          method: master ? 'POST' : 'PATCH', headers: { Authorization: basicHeader('teacher', credential), 'Content-Type': 'application/json' },
-          body: JSON.stringify(Object.fromEntries(fields)),
-          signal: AbortSignal.timeout(15000),
-        });
-        await requireOk(response); form.reset();
-        if (master) setMessage('已建立教師帳號。'); else logout();
-      } catch (error) { setMessage(requestMessage(error, '無法儲存，請確認連線後重試。')); }
-      finally { setBusy(false); }
-    }}>
-      {master ? <>
-        <label>新教師帳號<input name="username" autoComplete="off" required maxLength={64} /></label>
-        <label>教師姓名（選填）<input name="displayName" autoComplete="off" maxLength={40} /></label>
-      </> : <label>目前密碼<input name="currentPassword" type="password" autoComplete="current-password" maxLength={256} required /></label>}
-      <label>{master ? '初始密碼' : '新密碼（儲存後請重新登入）'}<input name="password" type="password" autoComplete="new-password" minLength={8} maxLength={256} required /></label>
-      <button className="primary" disabled={busy}>{master ? '建立教師帳號' : '修改自己的密碼'}</button>
-      {message && <p role="status">{message}</p>}
-    </form>
-    </dialog>
-  </>;
 }
 
 function SelectedRoom({ id, area, credential, navigate, logout, openProjection }: {
@@ -116,9 +65,6 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
     role: 'teacher', activityId: room.activityId, classroomId: room.classroomId, activityEpoch: room.activityEpoch,
   }));
   const [roster, setRoster] = useState<RosterResponse>();
-  const acceptRoster = useCallback((next: RosterResponse) => {
-    setRoster(current => !current || current.rosterVersion <= next.rosterVersion ? next : current);
-  }, []);
   const [error, setError] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const [pendingImportRefresh, setPendingImportRefresh] = useState<number>();
@@ -195,10 +141,10 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
         if (response.status === 401) return logout();
         await requireOk(response);
         const data = await response.json() as RosterResponse;
-        if (!controller.signal.aborted) acceptRoster(data);
+        if (!controller.signal.aborted) setRoster(current => !current || current.rosterVersion <= data.rosterVersion ? data : current);
       }).catch(error => { if (!controller.signal.aborted) setError(requestMessage(error, '分組名單載入失敗，請確認連線後重新載入頁面。')); });
     return () => controller.abort();
-  }, [session, credential, logout, view?.rosterVersion, acceptRoster]);
+  }, [session, credential, logout, view?.rosterVersion]);
 
   async function startNew() {
     if (!canStartNew || startRequest.current) return;
@@ -242,7 +188,6 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
   const phase = view?.phase ?? room.phase;
   const serverWriteback = view ? Boolean(view.writebackInProgress) : Boolean(room.writebackInProgress);
   const link = (to: Area) => to === 'settings' ? base : base + '/' + to;
-  const areaIndex = areas.indexOf(area);
   const roundRestriction = phase === 'active' ? '請先到控制台結束搶答，再審核並定案。'
     : phase === 'reviewing' ? '請先到控制台完成審核與定案。' : '';
   const settlementRestriction = roundRestriction || (!view || syncError || scopeUnconfirmed ? '請等待確認目前活動。' : '');
@@ -298,30 +243,12 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
     requestAnimationFrame(() => settlementButton.current?.focus());
   }
 
-  function pageLink(to: Area | undefined, direction: 'prev' | 'next') {
-    if (!to) return null;
-    const previous = direction === 'prev';
-    return <a rel={direction} href={link(to)} onClick={event => {
-      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-      event.preventDefault();
-      navigate(link(to));
-    }}>
-      {previous && <ClassroomIcon name="back" />}
-      <span><small>{previous ? '上一頁' : '下一頁'}</small>{areaNames[to]}</span>
-      {!previous && <ClassroomIcon name="arrow" />}
-    </a>;
-  }
-  const pageNav = <nav className="workspace-pager" aria-label="工作區換頁">
-    {pageLink(areas[areaIndex - 1], 'prev')}
-    {pageLink(areas[areaIndex + 1], 'next')}
-  </nav>;
-
   return <>
     <header className="classroom-page-title">
-      <a className="back-link" href={rootPath} onClick={event => { event.preventDefault(); exitRoom(); }}><ClassroomIcon name="back" />返回教室列表</a>
+      <a href={rootPath} onClick={event => { event.preventDefault(); exitRoom(); }}>返回教室列表</a>
       <h1 ref={focus} tabIndex={-1}>{room.name}</h1>
-      <nav className="classroom-nav" aria-label="教室工作區">{areas.map(item =>
-        <a key={item} href={link(item)} aria-current={item === area ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate(link(item)); }}><ClassroomIcon name={item === 'groups' ? 'group' : item === 'settings' ? 'book' : 'board'} />{areaNames[item]}</a>)}
+      <nav className="classroom-nav" aria-label="教室工作區">{(Object.keys(areaNames) as Area[]).map(item =>
+        <a key={item} href={link(item)} aria-current={item === area ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate(link(item)); }}>{areaNames[item]}</a>)}
         <a className="projection-link" href={base + '/projection'} target="_blank" rel="opener"
           aria-label="開啟教室投影（新分頁）" onAuxClick={event => {
             if (event.button !== 1) return;
@@ -330,16 +257,15 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
           }} onClick={event => {
             event.preventDefault();
             setError(openProjection(room) ? '' : '瀏覽器阻擋投影視窗，請允許開啟新分頁後再試。');
-          }}><ClassroomIcon name="projection" />開啟教室投影</a>
+          }}>開啟教室投影</a>
       </nav>
     </header>
     {error && <p className="error work-message" role="alert">{error}</p>}
     {scopeStatus === 'stale' && <button className="secondary-button" onClick={() => void reloadLocation()}>重新取得活動</button>}
     {area === 'groups' && <section className="work-panel">
-      {roster ? <Roster {...{ session, credential, roster }} standings={view?.standings ?? view?.settlement?.groups} onSave={acceptRoster} />
+      {roster ? <Roster {...{ session, credential, roster }} onSave={setRoster} />
         : !error && <p role="status">正在載入分組…</p>}
       <ArchivedRosters classroomId={room.id} credential={credential} />
-      {pageNav}
     </section>}
     <div hidden={area === 'groups' || visibleSettlement}>
       <div className={area === 'console' ? 'work-panel console-panel' : 'work-panel'}>
@@ -349,16 +275,13 @@ function TeacherWorkspace({ room, area, credential, navigate, logout, openProjec
           onUnconfirmed={() => setPendingImportRefresh(refresh())} onExpired={exitRoom} />}</div>
         <TeacherRound {...{ session, credential, view, syncError, refresh, fullSnapshot, completedRefresh }}
           mode={area === 'console' ? 'console' : 'settings'} blocked={waitingImport || importBusy || scopeUnconfirmed}
-          consoleAction={area === 'console' && !visibleSettlement && <>
-            <button type="button" className="settlement-shortcut" ref={settlementButton} disabled={Boolean(settlementRestriction)}
-              aria-describedby={settlementRestriction ? 'settlement-hint' : undefined} onClick={() => setSettlement(true)}>
-              <ClassroomIcon name="trophy" />結算
-            </button>
-            {settlementRestriction && <p id="settlement-hint" className="muted">{settlementRestriction}</p>}
-          </>}
           onSettings={() => navigate(base)} onExpired={exitRoom} />
-        {area !== 'groups' && !visibleSettlement && pageNav}
       </div>
+      {area === 'console' && !visibleSettlement && <div className="activity-actions">
+        <button className="secondary-button" ref={settlementButton} disabled={Boolean(settlementRestriction)}
+          aria-describedby={settlementRestriction ? 'settlement-hint' : undefined} onClick={() => setSettlement(true)}>結算</button>
+        {settlementRestriction && <p id="settlement-hint" className="muted">{settlementRestriction}</p>}
+      </div>}
     </div>
     {visibleSettlement && <section className="work-panel teacher-results-panel">
       <div className="section-heading">

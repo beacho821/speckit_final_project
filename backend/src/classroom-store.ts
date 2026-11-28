@@ -7,13 +7,11 @@ import type { RoundQuestion, StudentMember, Worksheet } from '../../shared/api.j
 export type StoredActivity = Pick<Activity, 'id' | 'groups' | 'rosterVersion' | 'rosterLocked' | 'worksheet' | 'units' | 'rounds'> & {
   queueUnitIds?: string[];
   settlementPublished?: boolean;
-  settlementGroupCount?: number;
   members: StudentMember[];
   startedAt: number;
   archivedAt?: number;
 };
 export interface ClassroomRecord {
-  ownerId?: string;
   schemaVersion: 1;
   id: string;
   name: string;
@@ -34,7 +32,7 @@ export interface LoadedStorage extends ClassroomStorage {
 
 const classroomId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export async function atomicJson(path: string, value: unknown) {
+async function atomicJson(path: string, value: unknown) {
   const temporary = path + '.' + randomUUID() + '.tmp';
   const file = await open(temporary, 'wx', 0o600);
   try {
@@ -108,7 +106,6 @@ function checkQuestions(questions: RoundQuestion[], unitId: string) {
 function recordFrom(raw: unknown, id: string): ClassroomRecord {
   const data = raw as ClassroomRecord;
   if (!data || data.schemaVersion !== 1 || data.id !== id || !classroomId.test(id)
-    || (data.ownerId !== undefined && data.ownerId !== 'master' && !classroomId.test(data.ownerId))
     || typeof data.name !== 'string' || !data.name.trim()
     || !Number.isFinite(data.createdAt) || !Number.isFinite(data.updatedAt)
     || !Array.isArray(data.activities) || !data.activities.length) throw new Error('無法辨識教室紀錄。');
@@ -131,8 +128,6 @@ function recordFrom(raw: unknown, id: string): ClassroomRecord {
     }));
     if (groups.size !== activity.groups.length || activity.members.some(member => !member || !groups.has(member.groupId)
       || typeof member.name !== 'string' || typeof member.id !== 'string')) throw new Error('成員資料不一致。');
-    if (activity.settlementGroupCount !== undefined && (!Number.isSafeInteger(activity.settlementGroupCount)
-      || activity.settlementGroupCount < 0 || activity.settlementGroupCount > groups.size)) throw new Error('結算組數不一致。');
     const fills = activity.worksheet ? checkWorksheet(activity.worksheet) : new Map<string, Worksheet['fills'][number]>();
     const units = new Map<string, StoredActivity['units'][number]>();
     for (const unit of activity.units) {

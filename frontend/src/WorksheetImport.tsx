@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import AnswerSuggestions, { fillBlankAnswer } from './AnswerSuggestions';
-import type { BuzzerUnit, SessionResponse, WorksheetPreview } from '../../shared/api';
-import { hasQuestionParts, QuestionKind } from './QuestionKind';
+import type { SessionResponse, WorksheetPreview } from '../../shared/api';
 import { activityHeaders } from './api';
 
 interface Candidate { sheetId: number; title: string }
@@ -26,8 +24,6 @@ export default function WorksheetImport({
   session, credential, catalogRevision, preview = null, locked = false, unconfirmed = false, completedRefresh,
   onBusy, onPublished, onUnconfirmed, onExpired,
 }: Props) {
-  const [staged, setStaged] = useState<{ generation: number; revision?: number; units: Pick<BuzzerUnit, 'id' | 'name' | 'fillBlankIds'>[];
-    questions: { id: string; questionId: string; part?: string; prompt: string | null; text: string }[] }>();
   const [mode, setMode] = useState<'google' | 'xlsx'>('google');
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -60,7 +56,7 @@ export default function WorksheetImport({
 
   function resetSelection() {
     confirmedSource.current = null;
-    setStaged(undefined); setCandidates([]);
+    setCandidates([]);
     setError('');
   }
 
@@ -86,7 +82,7 @@ export default function WorksheetImport({
       const response = await fetch(path, {
         method: 'POST',
         headers: {
-          ...activityHeaders(session, credential), 'X-Prepare-Answers': 'true',
+          ...activityHeaders(session, credential),
           ...(catalogRevision === undefined ? {} : { 'X-Catalog-Revision': String(catalogRevision) }),
           ...(preview ? { 'X-Confirm-Worksheet-Replacement': 'true' } : {}),
           'Content-Type': upload ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/json',
@@ -107,12 +103,6 @@ export default function WorksheetImport({
         setCandidates(body.candidates);
         return;
       }
-      if (Array.isArray(body.questions)) {
-        const questions = body.questions.map((q: { id: string; questionId: string; prompt: string | null }) => ({ ...q, text: '' }));
-        setStaged({ generation: body.generation, revision: catalogRevision, questions,
-          units: body.units ?? questions.map((q: { id: string; questionId: string }) => ({ id: q.id, name: q.questionId, fillBlankIds: [q.id] })) });
-        setCandidates([]); return;
-      }
       resetSelection();
       setFile(null);
       onPublished?.();
@@ -127,47 +117,16 @@ export default function WorksheetImport({
     }
   }
 
-  function editAnswer(id: string, text: string) {
-    setStaged(previous => previous && ({ ...previous, questions: previous.questions.map(q => q.id === id ? { ...q, text } : q) }));
-  }
-
-  async function confirmAnswers() {
-    if (!staged || disabled || request.current) return;
-    const controller = new AbortController();
-    request.current = controller;
-    setBusy(true); onBusy?.(true); setError('');
-    try {
-      const response = await fetch('/api/worksheet/confirm', { method: 'POST', signal: controller.signal,
-        headers: { ...activityHeaders(session, credential), 'Content-Type': 'application/json', 'X-Catalog-Revision': String(staged.revision), ...(preview ? { 'X-Confirm-Worksheet-Replacement': 'true' } : {}) },
-        body: JSON.stringify({ generation: staged.generation, answers: staged.questions.filter(q => q.text.trim()).map(({ id, text }) => ({ id, text })) }),
-      });
-      if (controller.signal.aborted) return;
-      if (!response.ok) {
-        const body = await response.json();
-        if (response.status === 401 || body.code === 'ACTIVITY_EXPIRED') onExpired?.();
-        else setError(body.message);
-        return;
-      }
-      resetSelection(); setFile(null); onPublished?.();
-    } catch {
-      if (!controller.signal.aborted) { setUncertain(true); onUnconfirmed?.(); }
-    } finally {
-      request.current = null;
-      if (!controller.signal.aborted) { setBusy(false); onBusy?.(false); }
-    }
-  }
-
   function switchMode(next: 'google' | 'xlsx') {
     setMode(next);
     setFile(null);
     resetSelection();
   }
 
-  const questionsById = new Map(staged?.questions.map(q => [q.id, q]));
   return <section className="round-panel">
     <h2>匯入學習單</h2>
     {locked ? <p className="muted">已有回合開始，學習單已鎖定。</p> : <>
-      <p className="muted">預覽後可用 AI 補上空白的標準答案，確認後加入出題清單。</p>
+      <p className="muted">匯入後會將全部題目排入出題清單。</p>
       <div className="role-switch" role="group" aria-label="學習單來源">
         <button aria-pressed={mode === 'google'} disabled={disabled} className={mode === 'google' ? 'active' : ''} onClick={() => switchMode('google')}>Google 試算表</button>
         <button aria-pressed={mode === 'xlsx'} disabled={disabled} className={mode === 'xlsx' ? 'active' : ''} onClick={() => switchMode('xlsx')}>本機 XLSX</button>
@@ -188,25 +147,6 @@ export default function WorksheetImport({
         </>}
         <button ref={importButton} className="primary" disabled={disabled || (mode === 'xlsx' && !file)}>{busy ? '正在匯入…' : '匯入並預覽'}</button>
       </form>
-      {staged && <section className="form-stack"><h3>入列前確認標準答案</h3>
-        <AnswerSuggestions key={staged.generation} {...{ session, credential }} disabled={disabled || staged.revision !== catalogRevision}
-          targets={staged.questions.map(q => ({ ...q, label: '題號 ' + q.questionId, prompt: q.prompt ?? '' }))}
-          onAccept={suggestions => setStaged(previous => previous && previous.generation === staged.generation ? { ...previous,
-            questions: previous.questions.map(q => ({ ...q, text: fillBlankAnswer(suggestions, q.id, q.prompt ?? '', q.text) })),
-          } : previous)} />
-        {staged.units.map(unit => {
-          const questions = unit.fillBlankIds.map(id => questionsById.get(id)).filter(q => q !== undefined);
-          const grouped = hasQuestionParts(questions);
-          return <section className="question-unit" aria-label={unit.name} data-grouped={grouped} key={unit.id}>
-            <header className="unit-heading"><h4>{unit.name}</h4><QuestionKind grouped={grouped} count={questions.length} /></header>
-            {questions.map(q => <fieldset key={q.id} className="question-block" disabled={disabled}>
-              <legend>題號 {q.questionId}</legend><p className="question-prompt">{q.prompt || '缺少題幹，入列後可補上。'}</p>
-              <label>標準答案（選填，一行一種）<textarea value={q.text} onChange={e => editAnswer(q.id, e.target.value)} /></label>
-            </fieldset>)}
-          </section>;
-        })}
-        <button type="button" className="primary" disabled={disabled} onClick={() => void confirmAnswers()}>確認加入出題清單</button>
-        <button type="button" disabled={disabled} onClick={() => setStaged(undefined)}>取消預覽</button></section>}
       {candidates.length > 0 && <div className="form-stack">
         <label htmlFor="sheet-choice">選擇工作表（尚未發布）</label>
         <select id="sheet-choice" disabled={disabled} value="" onChange={event => {

@@ -1,9 +1,8 @@
 import { configureWorksheet, finishRound } from '../helpers/worksheet.js';
 import { describe, expect, it } from 'vitest';
 import { createActivity } from '../../backend/src/activity.js';
-import { FAIRNESS_DELAY_MS, hasWonBefore, openTimes } from '../../backend/src/fairness.js';
+import { FAIRNESS_DELAY_MS, hasWonBefore } from '../../backend/src/fairness.js';
 import { prepareRound, startRound, submitAnswers } from '../../backend/src/rounds.js';
-import { addManualQuestion } from '../../backend/src/questions.js';
 import type { FillBlank } from '../../shared/api.js';
 
 function activityWithPreviousWinner() {
@@ -17,59 +16,24 @@ function activityWithPreviousWinner() {
 }
 
 describe('公平順位開放時間', () => {
-  it('曾勝組在 7,999 毫秒被拒絕，滿 8,000 毫秒可收件', () => {
+  it('曾勝組在 2,999 毫秒被拒絕，滿 3,000 毫秒可收件', () => {
     const activity = activityWithPreviousWinner(); const round = prepareRound(activity, 'u2'); startRound(activity, round.id, 10_000);
-    expect(() => submitAnswers(activity, round.id, 'a', [{ questionId: '2', text: '答' }], 17_999)).toThrow('尚須等待');
+    expect(() => submitAnswers(activity, round.id, 'a', [{ questionId: '2', text: '答' }], 12_999)).toThrow('尚須等待');
     expect(round.submissions).toHaveLength(0);
-    expect(submitAnswers(activity, round.id, 'a', [{ questionId: '2', text: '答' }], 18_000).rank).toBe(1);
-    expect(FAIRNESS_DELAY_MS).toBe(5_000);
+    expect(submitAnswers(activity, round.id, 'a', [{ questionId: '2', text: '答' }], 13_000).rank).toBe(1);
+    expect(FAIRNESS_DELAY_MS).toBe(3_000);
   });
-  it('未勝組立即開放', () => {
+  it('未勝組立即開放；全組皆曾勝時曾勝組也立即開放', () => {
     const activity = activityWithPreviousWinner(); const round = prepareRound(activity, 'u2'); startRound(activity, round.id, 500);
     expect(submitAnswers(activity, round.id, 'b', [{ questionId: '2', text: '先答' }], 500).rank).toBe(1);
   });
-  it('無人得標仍佔一回合，得標滿兩題後立即開放', () => {
-    const activity = activityWithPreviousWinner();
-    for (const delay of [8000, 3450, 0, 0]) {
-      const question = addManualQuestion(activity, { prompt: '請填寫答案', acceptedAnswersText: '答' });
-      const round = prepareRound(activity, question.unitId);
-      startRound(activity, round.id, 10000);
-      expect(round.openAtByGroup).toEqual({ a: 10000 + delay, b: 10000 });
-      finishRound(activity, round.id);
-    }
-  });
-  it('兩組輪流得標且各答對一半，等待時間分別為 3.45 和 5.75 秒', () => {
+  it('全組都曾勝後不再延遲，無人作答的回合不產生勝出紀錄', () => {
     const activity = activityWithPreviousWinner();
     const second = prepareRound(activity, 'u2'); startRound(activity, second.id, 5_000);
     submitAnswers(activity, second.id, 'b', [{ questionId: '2', text: '乙組答案' }], 5_000); finishRound(activity, second.id);
     const third = prepareRound(activity, 'u3'); startRound(activity, third.id, 10_000);
-    expect(third.openAtByGroup).toEqual({ a: 13_450, b: 15_750 });
-    expect(submitAnswers(activity, third.id, 'a', [{ questionId: '3', text: '冷卻期滿送出' }], 13_450).rank).toBe(1);
-  });
-  it('只採最近五組的小題數與最終判分，連續得標不累加', () => {
-    const activity = activityWithPreviousWinner();
-    const first = activity.rounds[0];
-    const entry = first.submissions[0];
-    const makeRound = (parts: number, answers: typeof entry.answers, disqualified = false) => ({
-      ...first, questions: Array.from({ length: parts }, () => first.questions![0]),
-      winnerGroupId: undefined as string | undefined, submissions: [{ ...entry, answers, disqualified }],
-    });
-    const yes = { ...entry.answers[0], autoCorrect: true };
-    activity.rounds = [
-      first, makeRound(3, []), makeRound(1, [{ ...yes, autoCorrect: false, overrideCorrect: true }]),
-      makeRound(1, [yes], true), makeRound(1, [yes]), makeRound(2, [yes, yes]),
-    ];
-    activity.rounds[4].winnerGroupId = 'a';
-    activity.rounds[5].winnerGroupId = 'a';
-    expect(openTimes(activity, first, 0)).toEqual({ a: 5750, b: 0 });
-    activity.rounds[5].winnerGroupId = undefined;
-    expect(openTimes(activity, first, 0)).toEqual({ a: 3450, b: 0 });
-  });
-  it('上上題得標且全對時，最多等待 4.8 秒', () => {
-    const activity = activityWithPreviousWinner();
-    const previous = activity.rounds[0];
-    activity.rounds.push({ ...previous, winnerGroupId: 'b' });
-    expect(openTimes(activity, previous, 0).a).toBe(4800);
+    expect(third.openAtByGroup).toEqual({ a: 10_000, b: 10_000 });
+    expect(submitAnswers(activity, third.id, 'a', [{ questionId: '3', text: '可立即送出' }], 10_000).rank).toBe(1);
   });
   it('第一回合無人作答時，下一回合仍讓所有組別立即送出', () => {
     const activity = createActivity(); activity.groups = [{ id: 'a', name: '甲組' }, { id: 'b', name: '乙組' }];

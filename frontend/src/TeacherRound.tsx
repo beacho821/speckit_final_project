@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeAcceptedAnswers, type ActivityView, type CatalogUnit, type QuestionCardEdit,
   type QuestionCardSaved, type QuestionPartEdit, type SessionResponse } from '../../shared/api';
 import { activityHeaders, readError } from './api';
 import RoundHistory from './RoundHistory';
-import SubmissionAvailability, { type TimedSnapshot } from './SubmissionAvailability';
 import ManualQuestion from './ManualQuestion';
-import AnswerSuggestions, { fillBlankAnswer } from './AnswerSuggestions';
 import RoundReview from './RoundReview';
 import QuestionQueue from './QuestionQueue';
 import { questionLabel } from './question-label';
-import { hasQuestionParts, QuestionKind } from './QuestionKind';
 
 export type TeacherAction = (path: string, body?: unknown, method?: 'POST' | 'PATCH' | 'PUT' | 'DELETE') => Promise<boolean>;
 export type ReviewAction = (path: string, body: unknown, method: 'POST' | 'PATCH', signal: AbortSignal) => Promise<
@@ -19,7 +16,7 @@ export type ReviewAction = (path: string, body: unknown, method: 'POST' | 'PATCH
 interface Props {
   session: SessionResponse;
   credential: string;
-  view: TimedSnapshot<ActivityView> | null;
+  view: ActivityView | null;
   syncError?: string;
   blocked?: boolean;
   refresh?: () => number;
@@ -27,7 +24,6 @@ interface Props {
   fullSnapshot?: number;
   onExpired?: () => void;
   mode?: 'settings' | 'console' | 'combined';
-  consoleAction?: ReactNode;
   onSettings?: () => void;
 }
 
@@ -45,7 +41,7 @@ function cardMatches(unit: CatalogUnit | undefined, edit: QuestionCardEdit) {
   });
 }
 
-export default function TeacherRound({ session, credential, view, syncError = '', blocked = false, refresh, fullSnapshot, completedRefresh = 0, onExpired, mode = 'combined', onSettings, consoleAction }: Props) {
+export default function TeacherRound({ session, credential, view, syncError = '', blocked = false, refresh, fullSnapshot, completedRefresh = 0, onExpired, mode = 'combined', onSettings }: Props) {
   const [selected, setSelected] = useState('');
   const [deleting, setDeleting] = useState<{ id: string; revision: number | undefined }>();
   const deleteDialog = useRef<HTMLDialogElement>(null);
@@ -241,9 +237,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
     } }));
   }
 
-  if (!view) return <section className="round-panel">
-    <div className="section-heading console-heading"><h2>課堂回合</h2>{consoleAction}</div>
-    <p className="muted">{syncError || '正在連線並取得課堂狀態…'}</p></section>;
+  if (!view) return <section className="round-panel"><h2>課堂回合</h2><p className="muted">{syncError || '正在連線並取得課堂狀態…'}</p></section>;
   const showSettings = mode !== 'console';
   const showConsole = mode !== 'settings';
   const running = view.phase === 'active' || view.phase === 'reviewing';
@@ -267,8 +261,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
     : !next ? '請先到題目管理加入題目'
     : drafts[cardKey(next)]?.dirty ? '請先儲存題目修改'
     : !view.groups?.length ? '請先建立分組'
-    : next.questions.some(question => question.missingPrompt) ? '請補齊題幹' : '';
-  const liveQuestions = view.unit?.questions ?? [];
+    : next.questions.some(question => question.missingPrompt || !question.acceptedAnswers.length) ? '請補齊題幹和標準答案' : '';
   const lostDrafts = Object.entries(drafts).filter(([key, draft]) => draft.dirty
     && !cards.some(card => !card.opened && cardKey(card) === key));
 
@@ -280,10 +273,9 @@ export default function TeacherRound({ session, credential, view, syncError = ''
     const stale = draft && (draft.catalogRevision !== catalogRevision || draft.questions.length !== card.questions.length
       || card.questions.some(question => !draft.questions.some(part => part.questionKey === question.questionKey
         && part.questionRevision === question.questionRevision)));
-    const grouped = hasQuestionParts(card.questions);
-    return <div className="question-card-content" data-grouped={grouped}>
+    return <div className="question-card-content">
       <header className="question-card-heading">
-        <div><div className="unit-heading"><h3>{`出題順序 ${position + 1}`}</h3><QuestionKind grouped={grouped} count={card.questions.length} /></div>
+        <div><h4>{`出題順序 ${position + 1}`}</h4>
           {(card.opened || isManual) && <p className="muted">{card.opened ? '已開放' : '手動題'}</p>}</div>
         {!card.opened && <div className="row-actions">
           <button className="quiet question-icon" type="button" aria-label={editing ? '取消編修' : '編修題目'}
@@ -308,31 +300,18 @@ export default function TeacherRound({ session, credential, view, syncError = ''
       </header>
       {card.questions.map((question, index) => {
         const part = draft?.questions.find(item => item.questionKey === question.questionKey);
-        return editing ? <fieldset className="form-stack question-editor question-block" key={question.questionKey} disabled={disabled || running}>
-          <legend>{grouped ? `第 ${index + 1} 部分` : '編修內容'}</legend>
+        return editing ? <fieldset className="form-stack question-editor" key={question.questionKey} disabled={disabled || running}>
+          <legend>{card.questions.length > 1 ? `第 ${index + 1} 部分` : '編修內容'}</legend>
           <label>題幹<textarea rows={2} value={part?.prompt ?? question.prompt ?? ''} onChange={event => editPart(key, question.questionKey, { prompt: event.target.value })} /></label>
           <label>標準答案（一行一種答案）<textarea rows={3} value={part?.acceptedAnswersText ?? question.acceptedAnswers.join('\n')} onChange={event => editPart(key, question.questionKey, { acceptedAnswersText: event.target.value })} /></label>
           {stale && <p>目前題幹：{question.prompt ?? '缺少題幹'}<br />目前標準答案：{question.acceptedAnswers.join('、') || '尚未填寫'}</p>}
-        </fieldset> : <div className="question-block" key={question.questionKey}>
-          {grouped && <h4 className="part-label">第 {index + 1} 部分</h4>}
-          <p className="question-prompt">{question.prompt ?? '缺少題幹'}</p>
-          {!question.acceptedAnswers.length && <small className="question-incomplete">此題由老師判分</small>}
+        </fieldset> : <p className="question-prompt" key={question.questionKey}>
+          {card.questions.length > 1 && <b>第 {index + 1} 部分　</b>}{question.prompt ?? '缺少題幹'}
+          {!question.acceptedAnswers.length && <small className="question-incomplete">缺少標準答案</small>}
           {draft?.dirty && <small className="question-incomplete">有未儲存修改</small>}
-        </div>;
+        </p>;
       })}
       {editing && draft && <>
-        <AnswerSuggestions {...{ session, credential }} disabled={disabled || running || Boolean(stale)}
-          targets={draft.questions.map((part, index) => {
-            const label = draft.questions.length > 1 ? `第 ${index + 1} 部分（題號 ${card.questions[index]?.questionId ?? index + 1}）` : '單題';
-            return { id: part.questionKey, label, part: draft.questions.length > 1 ? label : undefined, prompt: part.prompt, text: part.acceptedAnswersText };
-          })}
-          onAccept={suggestions => setDrafts(current => {
-            const active = current[key];
-            if (!active) return current;
-            return { ...current, [key]: { ...active, dirty: true, questions: active.questions.map(q => ({ ...q,
-              acceptedAnswersText: fillBlankAnswer(suggestions, q.questionKey, q.prompt, q.acceptedAnswersText),
-            })) } };
-          })} />
         {running && <p role="status">請先完成目前回合，再儲存題卡。</p>}
         {stale && <><p role="status">題目清單已有更新，請核對最新題卡後再儲存。</p>
           <button className="quiet" disabled={disabled || running} onClick={() => {
@@ -359,7 +338,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
     {showSettings && <>
       <div className="section-heading">
         <h2 tabIndex={-1} ref={queueHeading}>出題清單</h2>
-        <ManualQuestion {...{ session, credential }} disabled={disabled || running} error={message}
+        <ManualQuestion disabled={disabled || running} error={message}
           onAdd={(prompt, acceptedAnswersText) => action('/api/questions', { prompt, acceptedAnswersText, catalogRevision })} />
       </div>
       <QuestionQueue items={queue} sortable={sortable} disabled={disabled} catalogRevision={catalogRevision}
@@ -396,23 +375,17 @@ export default function TeacherRound({ session, credential, view, syncError = ''
           onClick={() => void action('/api/rounds/open-next', { unitId: next.id, catalogRevision })}>開放搶答</button>}
         {roundPath && view.phase === 'active' && <button className="danger-button" disabled={disabled}
           onClick={() => void action(`${roundPath}/end`)}>結束搶答</button>}
-        {consoleAction}
       </div>
       {!running && next && <div className="next-question">
-        <div className="unit-heading"><h3>下一題</h3><QuestionKind grouped={hasQuestionParts(next.questions)} count={next.questions.length} /></div>
-        {next.questions.map((question, index) => <div key={question.questionKey} className="question-block">
-          {hasQuestionParts(next.questions) && <strong className="part-label">第 {index + 1} 部分</strong>}
-          <p className="question-prompt">{question.prompt ?? '缺少題幹'}</p></div>)}
+        <h3>下一題</h3>
+        {next.questions.map(question => <p key={question.questionKey} className="question-prompt">{question.prompt ?? '缺少題幹'}</p>)}
       </div>}
       {!running && preparationIssue && <p className="work-message">{preparationIssue}。{' '}
         {onSettings && <button className="secondary-button" onClick={onSettings}>前往題目管理</button>}
       </p>}
       <div className={view.phase === 'active' ? 'console-grid' : undefined}>
         <div>
-          {running && liveQuestions.length > 0 && <section className="question-unit" data-grouped={hasQuestionParts(liveQuestions)}>
-            <QuestionKind grouped={hasQuestionParts(liveQuestions)} count={liveQuestions.length} />
-            {liveQuestions.map(question => <div key={question.questionId} className="question-block"><strong className="part-label">{questionLabel(question)}</strong><p className="question-prompt">{question.prompt}</p></div>)}
-          </section>}
+          {running && view.unit?.questions?.map(question => <p key={question.questionId} className="question-prompt"><b>{questionLabel(question)}</b> {question.prompt}</p>)}
           {visibleReviews.map(snapshot => {
             if (!snapshot.roundId || !snapshot.review) return null;
             const path = `/api/rounds/${encodeURIComponent(snapshot.roundId)}`;
@@ -429,8 +402,7 @@ export default function TeacherRound({ session, credential, view, syncError = ''
           })}
         </div>
         {view.phase === 'active' && view.groups && <div className="group-progress">{view.groups.map(group => <article className="progress-card" key={group.id}>
-          <div><strong>{group.name}</strong><span className={group.received ? 'status received' : 'status'}>{group.received
-            ? `已送出 · 第 ${group.rank} 順位` : <SubmissionAvailability waitMs={group.waitRemainingMs} sampledAt={view.sampledAt} />}</span></div>
+          <div><strong>{group.name}</strong><span className={group.received ? 'status received' : 'status'}>{group.received ? `已送出 · 第 ${group.rank} 順位` : '尚未送出'}</span></div>
           {group.answers?.map(answer => <p key={answer.questionId}><span>{questionLabel(view.unit?.questions?.find(question => question.questionId === answer.questionId) ?? answer)}</span>{answer.text}</p>)}
         </article>)}</div>}
       </div>

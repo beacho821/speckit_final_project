@@ -7,15 +7,12 @@ export interface Activity {
   joinCodes: Map<string, string>;
   usedJoinCodes: Set<string>;
   members: Map<string, StudentMember>;
-  // 僅在本場執行期間記錄成員實際登入用的加入碼，不寫入教室存檔。
-  memberLoginCodes: Map<string, Set<string>>;
   rosterVersion: number;
   rosterLocked: boolean;
   worksheet: Worksheet | null;
   units: CatalogUnit[];
   rounds: Round[];
   settlementPublished?: boolean;
-  settlementGroupCount?: number;
   queueUnitIds: string[];
   catalogRevision: number;
   version: number;
@@ -25,7 +22,7 @@ export interface Activity {
 }
 
 export function createActivity(): Activity {
-  return { id: randomUUID(), groups: [], joinCodes: new Map(), usedJoinCodes: new Set(), members: new Map(), memberLoginCodes: new Map(), rosterVersion: 0, rosterLocked: false, worksheet: null, units: [], rounds: [], queueUnitIds: [], catalogRevision: 0, version: 0, viewVersions: {}, importGeneration: 0, writebackInProgress: false };
+  return { id: randomUUID(), groups: [], joinCodes: new Map(), usedJoinCodes: new Set(), members: new Map(), rosterVersion: 0, rosterLocked: false, worksheet: null, units: [], rounds: [], queueUnitIds: [], catalogRevision: 0, version: 0, viewVersions: {}, importGeneration: 0, writebackInProgress: false };
 }
 
 export function changed(activity: Activity, visibleTo: string[] = ['teacher', ...activity.groups.map(group => `student:${group.id}`)]) {

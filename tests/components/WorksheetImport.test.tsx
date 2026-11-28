@@ -69,24 +69,3 @@ it('重新同步完成時會清除匯入待確認，即使畫面未先呈現父�
   await show(1);
   expect(host.textContent).not.toContain('匯入結果待確認');
 });
-
-it('預覽中的 AI 多個可接受答案只有採用並確認後才入列', async () => {
-  const published = vi.fn();
-  const request = vi.spyOn(globalThis, 'fetch')
-    .mockResolvedValueOnce(Response.json({ generation: 4, questions: [{ id: 'f', questionId: '1', prompt: '負責執行指令的元件？' }] }))
-    .mockResolvedValueOnce(Response.json({ answers: ['中央處理器', 'CPU'] }))
-    .mockResolvedValueOnce(Response.json({}));
-  await render(<WorksheetImport session={session} credential="test" catalogRevision={0} onPublished={published} />);
-  await input('Google 試算表網址', 'https://docs.google.com/test');
-  await click('匯入並預覽');
-  expect(published).not.toHaveBeenCalled();
-  await click('AI 產生建議答案');
-  await click('產生建議');
-  expect(host.querySelector('textarea')?.value).toBe('');
-  await click('加入標準答案');
-  expect(host.querySelector('textarea')?.value).toBe('中央處理器\nCPU');
-  await click('確認加入出題清單');
-  expect(request.mock.calls[2][0]).toBe('/api/worksheet/confirm');
-  expect(JSON.parse(String(request.mock.calls[2][1]?.body))).toEqual({ generation: 4, answers: [{ id: 'f', text: '中央處理器\nCPU' }] });
-  expect(published).toHaveBeenCalledOnce();
-});

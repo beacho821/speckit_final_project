@@ -110,32 +110,3 @@ it('隔離外層有效但來源、題組、題目、補答或收件關聯損壞�
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
-
-it('重啟後教師帳號仍可登入，舊教室歸主帳號、子帳號保有自己的教室', async () => {
-  const { TeacherAccounts } = await import('../../backend/src/accounts');
-  const { randomUUID } = await import('node:crypto');
-  const directory = await mkdtemp(join(tmpdir(), 'classroom-accounts-'));
-  const config = { teacherPassword: randomUUID(), teacherUsername: '主教師', teacherDisplayName: '張老師', port: 0 };
-  const secret = randomUUID();
-  try {
-    const accounts = await TeacherAccounts.open(config, join(directory, 'teachers'));
-    const master = await accounts.login('主教師', config.teacherPassword);
-    expect(master.displayName).toBe('張老師');
-    await accounts.update(accounts.identity(master.token), '教師乙', secret, true);
-    const sub = await accounts.login('教師乙', secret);
-    const id = accounts.identity(sub.token);
-    const rooms = await Classrooms.restore(await openClassroomStorage(join(directory, 'rooms')), config.teacherPassword);
-    const old = await rooms.create('舊教室'), mine = await rooms.create('子帳號教室', id);
-    const path = join(directory, 'rooms', old.id + '.json');
-    const legacy = JSON.parse(await readFile(path, 'utf8')); delete legacy.ownerId; await writeFile(path, JSON.stringify(legacy));
-    const restart = await TeacherAccounts.open(config, join(directory, 'teachers'));
-    const restored = await Classrooms.restore(await openClassroomStorage(join(directory, 'rooms')), config.teacherPassword);
-    expect(() => restart.identity(sub.token)).toThrow('重新登入');
-    const restoredTeacher = await restart.login('教師乙', secret);
-    expect(restoredTeacher.displayName).toBe('教師乙');
-    expect(restart.identity(restoredTeacher.token)).toBe(id);
-    expect(restored.list(id).map(room => room.id)).toEqual([mine.id]);
-    expect(restored.list('master').map(room => room.id)).toEqual([old.id]);
-    expect(await readFile(join(directory, 'teachers', 'accounts.json'), 'utf8')).not.toContain(secret);
-  } finally { await rm(directory, { recursive: true, force: true }); }
-});

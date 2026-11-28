@@ -81,10 +81,8 @@ try {
     now += 4000;
     const round = prepareRound(room.activity, id);
     startRound(room.activity, round.id, now);
-    // 此腳本重現 008 已開始回合的歷史相容情境。
-    delete round.optionalSupplements;
     rows.forEach(([groupId, ...texts], index) => submitAnswers(room.activity, round.id, groupId,
-      round.questions.map(({ questionId }, i) => ({ questionId, text: texts[i] })), Math.max(now + 2000, round.openAtByGroup[groupId]) + index));
+      round.questions.map(({ questionId }, i) => ({ questionId, text: texts[i] })), now + 2000 + index));
     return round;
   }
   for (const [id, rows, expected] of [

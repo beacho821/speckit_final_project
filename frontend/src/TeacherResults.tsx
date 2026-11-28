@@ -54,16 +54,13 @@ export default function TeacherResults({ session, credential, source, hasResults
   const [downloading, setDownloading] = useState(false);
   const busy = downloading || writeback.pending;
   useEffect(() => () => csvRequest.current?.abort(), []);
-  async function download(original?: File) {
+  async function download() {
     if (csvRequest.current || busy || disabled || !hasResults) return;
     const controller = new AbortController();
     csvRequest.current = controller;
     setDownloading(true); setDownloadMessage('');
     try {
-      const response = await fetch(original ? '/api/worksheet/results.xlsx' : '/api/results.csv', {
-        ...(original ? { method: 'POST', body: original } : {}),
-        headers: { ...activityHeaders(session, credential), ...(original ? { 'Content-Type': 'application/octet-stream' } : {}) }, signal: controller.signal,
-      });
+      const response = await fetch('/api/results.csv', { headers: activityHeaders(session, credential), signal: controller.signal });
       if (!response.ok) {
         const error = await readError(response);
         if (controller.signal.aborted) return;
@@ -75,8 +72,8 @@ export default function TeacherResults({ session, credential, source, hasResults
       const blob = await response.blob();
       if (controller.signal.aborted) return;
       const url = URL.createObjectURL(blob); const link = document.createElement('a');
-      link.href = url; link.download = original ? 'classroom-results.xlsx' : 'classroom-results.csv'; link.click(); URL.revokeObjectURL(url);
-      setDownloadMessage(original ? '學習單副本已下載。' : 'CSV 已下載。');
+      link.href = url; link.download = 'classroom-results.csv'; link.click(); URL.revokeObjectURL(url);
+      setDownloadMessage('CSV 已下載。');
     } catch {
       if (!controller.signal.aborted) setDownloadMessage('下載失敗，請確認連線後重試。');
     } finally {
@@ -86,23 +83,18 @@ export default function TeacherResults({ session, credential, source, hasResults
   }
   return <section className="round-panel">
     <h2>回填與匯出</h2>
-    {hasResults && source?.kind === 'xlsx' && <label>選取原始 XLSX，下載填好的副本
-      <input type="file" accept=".xlsx" disabled={busy || disabled} onChange={event => {
-        const file = event.target.files?.[0]; event.target.value = '';
-        if (file) void download(file);
-      }} /></label>}
     {!hasResults && <p className="muted">目前沒有可回填的答案，也沒有已定案的結果可匯出。</p>}
     {hasResults && (source?.kind === 'google'
       ? <p className="muted">回填前會重新比對每個題號與原稿內容；衝突時整批不寫入。回填期間請暫停共同編輯。</p>
-      : <p className="muted">{source?.kind === 'xlsx' ? '請選取匯入時的原始檔案以產生 XLSX 副本，也可下載活動 CSV。' : '目前沒有可回填的 Google 原稿，請下載活動 CSV。'}</p>)}
+      : <p className="muted">{source?.kind === 'xlsx' ? '本機 XLSX 學習單不支援回填原檔，請下載活動 CSV。' : '目前沒有可回填的 Google 原稿，請下載活動 CSV。'}</p>)}
     <div className="actions-row">
       <button className="secondary-button" disabled={disabled || busy || !hasResults || source?.kind !== 'google'}
-        onClick={() => { setDownloadMessage(''); void writeback.run(); }}>將定案答案回填原稿</button>
+        onClick={() => { setDownloadMessage(''); void writeback.run(); }}>將勝組答案回填原稿</button>
       <button className="primary" disabled={disabled || busy || !hasResults} onClick={() => void download()}>下載活動 CSV</button>
     </div>
     {(downloadMessage || writeback.message) && <p className="muted" role="status">{downloadMessage || writeback.message}</p>}
     {writeback.conflicts.map(conflict => <article className="conflict-card" key={conflict.questionId}>
-      <strong>{conflict.questionId}</strong><p>原稿目前內容：{conflict.currentValue}</p><p>預計回填：{conflict.winningAnswer}</p>
+      <strong>{conflict.questionId}</strong><p>原稿目前內容：{conflict.currentValue}</p><p>勝組答案：{conflict.winningAnswer}</p>
     </article>)}
   </section>;
 }

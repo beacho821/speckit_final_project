@@ -6,7 +6,6 @@ import { currentRound, DomainError, endRound, multipart } from './rounds.js';
 import { validateName } from './roster.js';
 
 export interface Classroom {
-  ownerId?: string;
   id: string;
   name: string;
   createdAt: number;
@@ -25,7 +24,7 @@ function storedActivity(activity: Activity, startedAt: number): StoredActivity {
   return {
     id: activity.id, startedAt, groups: activity.groups, members: [...activity.members.values()],
     worksheet: activity.worksheet, units: activity.units, queueUnitIds: activity.queueUnitIds, rosterLocked: activity.rosterLocked,
-    rosterVersion: activity.rosterVersion, settlementPublished: activity.settlementPublished, settlementGroupCount: activity.settlementGroupCount,
+    rosterVersion: activity.rosterVersion, settlementPublished: activity.settlementPublished,
     rounds: activity.rounds.map(round => {
       const { openedAt: _time, ...data } = round;
       return { ...data, openAtByGroup: {}, submissions: round.submissions.map(submission => ({
@@ -37,7 +36,7 @@ function storedActivity(activity: Activity, startedAt: number): StoredActivity {
 
 function snapshot(room: Classroom, activity = room.activity, updatedAt = room.updatedAt): ClassroomRecord {
   return {
-    schemaVersion: 1, ownerId: room.ownerId, id: room.id, name: room.name, createdAt: room.createdAt,
+    schemaVersion: 1, id: room.id, name: room.name, createdAt: room.createdAt,
     updatedAt, currentActivityId: activity.id,
     activities: [...room.history, storedActivity(activity, room.startedAt)],
   };
@@ -46,7 +45,7 @@ function snapshot(room: Classroom, activity = room.activity, updatedAt = room.up
 export class Classrooms {
   readonly runtime = randomUUID();
   private rooms = new Map<string, Classroom>();
-  private unavailable = new Map<string, { name: string; ownerId?: string }>();
+  private unavailable = new Map<string, string>();
   private pending = new Map<string, Promise<unknown>>();
   private issued = new Set<string>();
   private codeIndex = new Map<string, { room: Classroom; groupId: string }>();
@@ -56,7 +55,7 @@ export class Classrooms {
 
   static async restore(storage: LoadedStorage, password: string) {
     const directory = new Classrooms(storage, password, storage.epoch);
-    for (const id of storage.unavailable) directory.unavailable.set(id, { name: '無法讀取的教室（' + id + '）' });
+    for (const id of storage.unavailable) directory.unavailable.set(id, '無法讀取的教室（' + id + '）');
     for (const record of storage.records) {
       const current = record.activities.find(item => item.id === record.currentActivityId)!;
       for (const stored of record.activities) {
@@ -74,7 +73,7 @@ export class Classrooms {
       const queueUnitIds = [...new Set([...queued, ...worksheetIds, ...manual])];
       const activity = { ...createActivity(), ...current, queueUnitIds, members: new Map(current.members.map(member => [member.id, member])) };
       const room = {
-        ownerId: record.ownerId, id: record.id, name: record.name, createdAt: record.createdAt, updatedAt: record.updatedAt,
+        id: record.id, name: record.name, createdAt: record.createdAt, updatedAt: record.updatedAt,
         startedAt: current.startedAt, activity, history: record.activities.filter(item => item.id !== current.id),
       };
       try {
@@ -86,7 +85,7 @@ export class Classrooms {
         directory.issueForGroups(activity);
         directory.rooms.set(room.id, room);
         directory.updateStudentCodes(room, new Map());
-      } catch { directory.unavailable.set(room.id, { name: room.name, ownerId: room.ownerId ?? "master" }); }
+      } catch { directory.unavailable.set(room.id, room.name); }
     }
     return directory;
   }
@@ -139,24 +138,23 @@ export class Classrooms {
     return { ...this.summary(room), classroomId: room.id, activityId: room.activity.id, activityEpoch: this.runtime };
   }
 
-  list(ownerId?: string): ClassroomSummary[] {
-    return [...this.rooms.values()].filter(room => !ownerId || (room.ownerId ?? "master") === ownerId).map(room => this.summary(room))
+  list(): ClassroomSummary[] {
+    return [...this.rooms.values()].map(room => this.summary(room))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .concat([...this.unavailable].filter(([, room]) => !ownerId || room.ownerId === ownerId).map(([id, { name }]) => ({ id, name, updatedAt: 0, phase: 'idle', unavailable: true })));
+      .concat([...this.unavailable].map(([id, name]) => ({ id, name, updatedAt: 0, phase: 'idle', unavailable: true })));
   }
 
-  get(id: string, ownerId?: string): Classroom {
+  get(id: string): Classroom {
     const room = this.rooms.get(id);
-    if (room && (!ownerId || (room.ownerId ?? "master") === ownerId)) return room;
-    const damaged = this.unavailable.get(id);
-    if (damaged && (!ownerId || damaged.ownerId === ownerId)) throw new DomainError(503, 'CLASSROOM_UNAVAILABLE', '此教室暫時無法恢復，請檢查存檔並在重啟後重試。');
+    if (room) return room;
+    if (this.unavailable.has(id)) throw new DomainError(503, 'CLASSROOM_UNAVAILABLE', '此教室暫時無法恢復，請檢查存檔並在重啟後重試。');
     throw new DomainError(404, 'CLASSROOM_NOT_FOUND', '找不到教室，請返回教室列表。');
   }
 
-  async create(input: unknown, ownerId = "master") {
+  async create(input: unknown) {
     const name = validateName(input, '教室名稱');
     const now = Date.now();
-    const room: Classroom = { ownerId, id: randomUUID(), name, createdAt: now, updatedAt: now, startedAt: now, activity: createActivity(), history: [] };
+    const room: Classroom = { id: randomUUID(), name, createdAt: now, updatedAt: now, startedAt: now, activity: createActivity(), history: [] };
     await this.save(snapshot(room));
     this.rooms.set(room.id, room);
     return room;

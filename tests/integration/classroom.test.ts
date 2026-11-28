@@ -28,7 +28,6 @@ describe('完整課堂 HTTP 演練', () => {
         expect(studentViews.every(view => view.phase === 'active' && view.unit.questionIds[0] === String(index + 1))).toBe(true);
         expect(studentViews.every(view => !('groups' in view) && !('availableUnits' in view))).toBe(true);
 
-        clock += studentViews[winnerIndex].waitRemainingMs;
         const winner = students[winnerIndex];
         const answers = unit.questionIds.map(questionId => ({ questionId, text: `第 ${index + 1} 回合答案` }));
         const pendingTeacher = c.request(`/view?after=${teacherActive.version}`, c.teacher);

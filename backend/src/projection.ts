@@ -1,10 +1,10 @@
 import type { ProjectionView } from '../../shared/api.js';
 import type { Classroom } from './classrooms.js';
-import { currentRound, publishedAnswers, remainingWait } from './rounds.js';
+import { currentRound, publishedAnswers } from './rounds.js';
 import { previewQuestion } from './questions.js';
 import { activityStandings } from './scoring.js';
 
-export function projectionFor(room: Classroom, now = performance.now()): ProjectionView {
+export function projectionFor(room: Classroom): ProjectionView {
   const activity = room.activity;
   const round = currentRound(activity) ?? activity.rounds.at(-1);
   const published = round?.phase === 'ended';
@@ -25,7 +25,6 @@ export function projectionFor(room: Classroom, now = performance.now()): Project
     }) : [],
     groups: activity.groups.map(group => ({
       id: group.id, name: group.name, received: Boolean(visible && round.submissions.some(item => item.groupId === group.id)),
-      ...(round?.phase === 'active' ? { waitRemainingMs: remainingWait(round, group.id, now) } : {}),
     })),
     ...(winner ? { winnerGroupName: winner.name } : {}),
     ...(activity.settlementPublished ? { settlement: standings } : { standings: standings.groups }),
