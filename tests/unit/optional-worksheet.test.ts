@@ -1,0 +1,37 @@
+import ExcelJS from 'exceljs';
+import { expect, it } from 'vitest';
+import { createActivity } from '../../backend/src/activity';
+import { prepareRound, startRound, submitAnswers, endRound, updateReview, publishRound } from '../../backend/src/rounds';
+import { importXlsxWorksheet } from '../../backend/src/worksheet/xlsx-source';
+import { exportXlsx, planWriteback } from '../../backend/src/worksheet/writeback';
+import { configureWorksheet } from '../helpers/worksheet';
+
+it('無標答可以開題，人工判錯後選擇逐題補答與留白，兩種學習單輸出一致', async () => {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet('課堂');
+  sheet.addRows([['題號', '題目', '作答'], ['1（1）', '首都在哪裡？', null], ['1（2）', '位於哪一洲？', null]]);
+  book.addWorksheet('其他頁').getCell('A1').value = '保留原文';
+  const original = Buffer.from(await book.xlsx.writeBuffer());
+  const activity = createActivity();
+  activity.worksheet = (await importXlsxWorksheet(original, '課堂.xlsx', sheet.id)).worksheet!;
+  configureWorksheet(activity, () => []);
+  activity.groups = [{ id: 'a', name: '甲組' }];
+  const unit = activity.units[0];
+  const round = prepareRound(activity, unit.id);
+  startRound(activity, round.id, 0);
+  submitAnswers(activity, round.id, 'a', unit.questions.map(q => ({ questionId: q.questionId, text: '學生提交' })), 0);
+  endRound(activity, round.id);
+  expect(() => publishRound(activity, round.id, 0)).toThrow('未判分');
+  const grades = unit.questions.map(q => ({ questionId: q.questionId, groupId: 'a', correct: false }));
+  updateReview(activity, round.id, { reviewRevision: 0, grades });
+  expect(() => publishRound(activity, round.id, 1, [{ questionId: '不存在', text: '甲' }])).toThrow('補答');
+  publishRound(activity, round.id, 1, [{ questionId: unit.questions[0].questionId, text: '臺北' }]);
+  const plan = planWriteback(activity, activity.worksheet);
+  expect(plan.writes.map(write => write.text)).toEqual(['臺北']);
+  const output = new ExcelJS.Workbook();
+  await output.xlsx.load(await exportXlsx(activity, original) as never);
+  expect(output.worksheets[0].getCell('C2').value).toBe('臺北');
+  expect(output.worksheets[0].getCell('C3').value).toBeNull();
+  expect(output.worksheets[1].getCell('A1').value).toBe('保留原文');
+  await expect(exportXlsx(activity, Buffer.from('其他工作簿'))).rejects.toThrow('原始 XLSX');
+});

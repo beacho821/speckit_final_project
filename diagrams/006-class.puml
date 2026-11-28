@@ -1,0 +1,46 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName "STHeiti"
+title 改善教室操作與活動結算｜類別圖
+
+class "教室" as Room
+class "教師工作區" as Workspace {
+  預設分組管理
+}
+class "教室投影" as Projection {
+  等待、更新、重連或需重新開啟
+  偵測到斷線後保留最後畫面最多 10 秒
+  原教師視窗逾時未回應時提示重開
+  確認失去授權時清除內容
+}
+class "活動" as Activity {
+  目前回合階段
+  分組與定案紀錄
+}
+class "題目卡" as Card {
+  題幹與標準答案
+  單題或完整題組
+}
+class "出題清單" as Queue {
+  題卡順序
+  可排序範圍
+}
+class "結算檢視" as Settlement {
+  回填與匯出
+  開始新活動
+}
+class "已公布逐題結果" as Result {
+  本組答案與定案判定
+  可公布的正確答案
+}
+Room "1" o-- "0..*" Activity
+Room "1" -- "0..*" Workspace : 教師選擇
+Workspace --> Projection : 開啟所選教室
+Projection --> Room : 限定可見範圍
+Activity "1" *-- "0..*" Card
+Activity "1" *-- "1" Queue
+Queue "0..1" -- "0..*" Card : 依序選入
+Activity "1" -- "0..*" Result : 審核後公布
+Workspace ..> Settlement : 控制台主動進入
+Settlement --> Activity : 操作目前活動
+@enduml

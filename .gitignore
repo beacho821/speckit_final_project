@@ -1,0 +1,56 @@
+# 作業系統與編輯器暫存檔
+.DS_Store
+._*
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
+
+# Node.js 套件與建置產物；保留 package-lock.json
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+.vitest/
+.cache/
+*.tsbuildinfo
+
+# 日誌
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 本機環境設定；保留不含真實憑證的範例
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.template
+
+# 本機憑證與私鑰
+/credentials/
+/secrets/
+service-account*.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Python 工具的虛擬環境與快取
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.tmp
+
+# 教室存檔
+/classroom-data/

@@ -1,0 +1,4 @@
+// @vitest-environment jsdom
+import {it,expect,vi} from 'vitest';import {clearStudent,readStudent,saveStudent,SESSION_KEY} from '../../frontend/src/session';
+it('只保存本人、版本驗證及登出清除，教師不保存',()=>{sessionStorage.clear();saveStudent({role:'teacher',activityId:'a'},'secret');expect(sessionStorage.length).toBe(0);saveStudent({role:'student',activityId:'a',memberId:'m',studentName:'小明',groupId:'g'},'ABCDEFGH');expect(readStudent()).toEqual({version:1,activityId:'a',memberId:'m',studentName:'小明',joinCode:'ABCDEFGH'});expect(sessionStorage.getItem(SESSION_KEY)).not.toContain('groupId');clearStudent();expect(readStudent()).toBeNull();sessionStorage.setItem(SESSION_KEY,'{"version":0}');expect(readStudent()).toBeNull();});
+it('儲存不可用不阻止當次登入',()=>{const spy=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error();});expect(saveStudent({role:'student',activityId:'a'},'code')).toBe(false);spy.mockRestore();});

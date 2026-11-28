@@ -1,0 +1,37 @@
+@startuml
+!pragma layout smetana
+title 教師定案與學生倒數提示｜類別圖
+class "回合審核" as Review {
+  已儲存的判分及補答
+  待補答完整題號
+}
+class "子題" as Question {
+  完整題號
+  題組內順序
+}
+class "組別作答" as Submission {
+  組別資格
+  作答內容與判分
+  收件順序
+}
+class "教師審核草稿" as Draft {
+  未儲存的判分與補答
+  首次編輯的已存值
+  最近核對的已存值與逐筆選擇
+}
+class "定案結果" as Result {
+  已定案狀態
+  勝組或無勝組
+}
+class "學生作答草稿" as StudentDraft {
+  本組未送出內容
+  剩餘等待秒數
+  是否仍在收件
+}
+Review "1" -- "1..*" Question
+Review "1" -- "0..*" Submission
+Draft "0..*" --> "1" Review : 核對已儲存內容
+Review "1" -- "0..1" Result
+StudentDraft "0..*" --> "1" Review : 同一回合
+StudentDraft ..> Submission : 收件成功後成立
+@enduml

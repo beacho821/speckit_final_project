@@ -1,0 +1,36 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName "STHeiti"
+title 改善教室操作與活動結算｜組件圖
+actor 教師 as Teacher
+actor 學生 as Student
+
+rectangle "教師教室導覽" as Nav
+rectangle "分組管理" as Groups
+rectangle "題目管理" as Questions
+rectangle "老師控制台" as Console
+rectangle "結算檢視" as Settlement
+rectangle "教室投影" as Projection
+rectangle "學生歷史紀錄" as History
+rectangle "教師授權與教室範圍" as Access
+rectangle "目前活動及出題清單" as Activity
+rectangle "已公布的逐題結果" as Result
+rectangle "學習單原稿與活動匯出" as Output
+
+Teacher --> Nav
+Nav --> Groups : 進入教室的預設工作區
+Nav --> Questions
+Nav --> Console
+Nav --> Projection : 開啟所選教室
+Projection --> Access : 確認投影權限
+Projection --> Activity : 顯示公開題目與收件狀態
+Groups --> Activity : 管理分組
+Questions --> Activity : 編修、刪除、排序
+Console --> Activity : 主持及審核
+Console --> Settlement : 主動進入
+Settlement --> Activity : 檢查階段及確認切換
+Settlement --> Output : 回填與匯出
+Output --> Result : 取目前活動結果
+Student --> History
+History --> Result : 顯示本組已公布的判定
+@enduml

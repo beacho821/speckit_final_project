@@ -1,0 +1,440 @@
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { normalizeAcceptedAnswers, type ActivityView, type CatalogUnit, type QuestionCardEdit,
+  type QuestionCardSaved, type QuestionPartEdit, type SessionResponse } from '../../shared/api';
+import { activityHeaders, readError } from './api';
+import RoundHistory from './RoundHistory';
+import SubmissionAvailability, { type TimedSnapshot } from './SubmissionAvailability';
+import ManualQuestion from './ManualQuestion';
+import AnswerSuggestions, { fillBlankAnswer } from './AnswerSuggestions';
+import RoundReview from './RoundReview';
+import QuestionQueue from './QuestionQueue';
+import { questionLabel } from './question-label';
+import { hasQuestionParts, QuestionKind } from './QuestionKind';
+
+export type TeacherAction = (path: string, body?: unknown, method?: 'POST' | 'PATCH' | 'PUT' | 'DELETE') => Promise<boolean>;
+export type ReviewAction = (path: string, body: unknown, method: 'POST' | 'PATCH', signal: AbortSignal) => Promise<
+  { kind: 'ok'; data: unknown } | ({ kind: 'rejected'; status: number } & Awaited<ReturnType<typeof readError>>) | { kind: 'unknown' }
+>;
+
+interface Props {
+  session: SessionResponse;
+  credential: string;
+  view: TimedSnapshot<ActivityView> | null;
+  syncError?: string;
+  blocked?: boolean;
+  refresh?: () => number;
+  completedRefresh?: number;
+  fullSnapshot?: number;
+  onExpired?: () => void;
+  mode?: 'settings' | 'console' | 'combined';
+  consoleAction?: ReactNode;
+  onSettings?: () => void;
+}
+
+type QuestionCard = NonNullable<ActivityView['questionCards']>[number];
+type QuestionDraft = QuestionCardEdit & { dirty: boolean };
+
+function cardKey(unit: CatalogUnit) { return unit.questions[0]?.questionKey ?? unit.id; }
+
+function cardMatches(unit: CatalogUnit | undefined, edit: QuestionCardEdit) {
+  return unit && unit.questions.length === edit.questions.length && edit.questions.every(part => {
+    const question = unit.questions.find(candidate => candidate.questionKey === part.questionKey);
+    const answers = normalizeAcceptedAnswers(part.acceptedAnswersText);
+    return question?.prompt === part.prompt && question.acceptedAnswers.length === answers.length
+      && answers.every((answer, index) => answer === question.acceptedAnswers[index]);
+  });
+}
+
+export default function TeacherRound({ session, credential, view, syncError = '', blocked = false, refresh, fullSnapshot, completedRefresh = 0, onExpired, mode = 'combined', onSettings, consoleAction }: Props) {
+  const [selected, setSelected] = useState('');
+  const [deleting, setDeleting] = useState<{ id: string; revision: number | undefined }>();
+  const deleteDialog = useRef<HTMLDialogElement>(null);
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [pendingRefresh, setPendingRefresh] = useState<number | undefined>();
+  const actionRequest = useRef<AbortController | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, QuestionDraft>>({});
+  const [saved, setSaved] = useState<Record<string, QuestionCardSaved>>({});
+  const [lastReview, setLastReview] = useState<{ scope: string; view: ActivityView }>();
+  const [pendingPublications, setPendingPublications] = useState(() => new Map<string, { scope: string; view: ActivityView }>());
+  const pendingCard = useRef<{ id: string; key: string; edit: QuestionCardEdit } | null>(null);
+  const editButton = useRef<HTMLButtonElement | null>(null);
+  const returnFocus = useRef(false);
+  const queueHeading = useRef<HTMLHeadingElement>(null);
+  const awaitingSnapshot = pendingRefresh !== undefined && completedRefresh < pendingRefresh;
+  const disabled = blocked || busy || awaitingSnapshot;
+  const scope = JSON.stringify([session.classroomId, session.activityId, session.activityEpoch]);
+  const liveReview = view?.phase === 'reviewing' && view.roundId && view.review ? view : undefined;
+  const prior = lastReview?.scope === scope ? lastReview.view : undefined;
+  const closedReview = prior?.roundId && (!view?.roundId || view.roundId === prior.roundId)
+    && view?.closedRoundIds.includes(prior.roundId) ? prior : undefined;
+  const reviewView = liveReview ?? closedReview;
+  const reviewIsClosed = !!closedReview && !liveReview;
+  const carriedReviews = [...pendingPublications.values()]
+    .filter(publication => publication.scope === scope && publication.view.roundId
+      && reviewView?.roundId !== publication.view.roundId && view?.closedRoundIds.includes(publication.view.roundId))
+    .map(publication => publication.view);
+  const visibleReviews = reviewView ? [...carriedReviews, reviewView] : carriedReviews;
+  const settlePublication = useCallback((path: string) => {
+    const key = JSON.stringify([scope, path]);
+    setPendingPublications(current => {
+      if (!current.has(key)) return current;
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+  }, [scope]);
+  const readRoundResult = useCallback(async (path: string, signal: AbortSignal): Promise<unknown> => {
+    const response = await fetch(`${path}/results`, { headers: activityHeaders(session, credential), signal });
+    if (!response.ok) {
+      const issue = await readError(response);
+      if (!signal.aborted && (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED')) onExpired?.();
+      throw new Error(issue.message);
+    }
+    return response.json();
+  }, [session, credential, onExpired]);
+  useEffect(() => {
+    if (liveReview) setLastReview({ scope, view: liveReview });
+    else if (view?.roundId && view.roundId !== prior?.roundId) setLastReview(undefined);
+  }, [liveReview, scope, view?.roundId, prior?.roundId]);
+  useEffect(() => {
+    if (!deleting || busy || deleting.revision === view?.catalogRevision) return;
+    deleteDialog.current?.close();
+    setMessage('題目清單已更新，請核對最新內容後再刪除。');
+  }, [deleting, busy, view?.catalogRevision]);
+  useEffect(() => { setSelected(''); }, [session.activityId, view?.worksheetPreview?.source.importedAt]);
+  useEffect(() => {
+    setDrafts({}); setSaved({}); setBusy(false); setPendingRefresh(undefined); setMessage('');
+    setPendingPublications(new Map());
+    pendingCard.current = null;
+    return () => actionRequest.current?.abort();
+  }, [scope]);
+  useEffect(() => {
+    if (selected || !returnFocus.current) return;
+    returnFocus.current = false;
+    if (editButton.current?.isConnected) editButton.current.focus();
+    else queueHeading.current?.focus();
+  }, [selected]);
+
+  useEffect(() => {
+    if (pendingRefresh === undefined || completedRefresh < pendingRefresh) return;
+    setPendingRefresh(undefined);
+    const pending = pendingCard.current;
+    pendingCard.current = null;
+    if (!pending) {
+      setMessage('已取得最新課堂狀態，請核對操作是否完成。');
+      return;
+    }
+    if (cardMatches(view?.questionCards?.find(card => card.id === pending.id), pending.edit)) {
+      closeEditor(pending.key);
+      setMessage('已確認題卡儲存完成。');
+    } else {
+      setMessage('已取得最新題卡。請核對已存內容與草稿後再操作。');
+    }
+  }, [completedRefresh, pendingRefresh, view]);
+
+  async function action(path: string, body?: unknown, method: Parameters<TeacherAction>[2] = 'POST',
+    cardSave?: { id: string; key: string; edit: QuestionCardEdit }): Promise<boolean> {
+    if (actionRequest.current && !actionRequest.current.signal.aborted) return false;
+    const controller = new AbortController();
+    actionRequest.current = controller;
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await fetch(path, {
+        method, signal: controller.signal,
+        headers: { ...activityHeaders(session, credential), 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      if (controller.signal.aborted) return false;
+      if (!response.ok) {
+        const issue = await readError(response);
+        if (controller.signal.aborted) return false;
+        if (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED') onExpired?.();
+        else {
+          setMessage(issue.message);
+          if (response.status === 409 || response.status === 404) refresh?.();
+        }
+        return false;
+      }
+      if (cardSave) {
+        const result = await response.json() as QuestionCardSaved;
+        if (controller.signal.aborted) return false;
+        if (result.unit?.id !== cardSave.id || !Number.isSafeInteger(result.catalogRevision)
+          || !Array.isArray(result.unit.questions) || !cardMatches(result.unit, cardSave.edit)) throw new Error();
+        setSaved(current => ({ ...current, [result.unit.id]: result }));
+        closeEditor(cardSave.key);
+      }
+      setPendingRefresh(undefined);
+      refresh?.();
+      return true;
+    } catch {
+      if (controller.signal.aborted) return false;
+      pendingCard.current = cardSave ?? null;
+      setPendingRefresh(refresh?.() ?? Infinity);
+      setMessage('操作結果待確認，請等待最新課堂狀態，再核對目前資料。');
+      return false;
+    } finally {
+      if (actionRequest.current === controller) actionRequest.current = null;
+      if (!controller.signal.aborted) setBusy(false);
+    }
+  }
+
+  const reviewAction: ReviewAction = async (path, body, method, signal) => {
+    if (signal.aborted || (actionRequest.current && !actionRequest.current.signal.aborted)) return { kind: 'unknown' };
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    actionRequest.current = controller;
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await fetch(path, {
+        method, signal: controller.signal,
+        headers: { ...activityHeaders(session, credential), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (response.ok) return { kind: 'ok', data: await response.json() };
+      const issue = await readError(response);
+      if (!controller.signal.aborted && (response.status === 401 || issue.code === 'ACTIVITY_EXPIRED')) onExpired?.();
+      return response.status >= 500 ? { kind: 'unknown' } : { kind: 'rejected', status: response.status, ...issue };
+    } catch {
+      return { kind: 'unknown' };
+    } finally {
+      signal.removeEventListener('abort', abort);
+      if (actionRequest.current === controller) {
+        actionRequest.current = null;
+        setBusy(false);
+      }
+    }
+  };
+
+  function closeEditor(key: string) {
+    setDrafts(current => {
+      const remaining = { ...current };
+      delete remaining[key];
+      return remaining;
+    });
+    if (selected === key) {
+      returnFocus.current = true;
+      setSelected('');
+    }
+  }
+
+  function startEdit(card: QuestionCard, button: HTMLButtonElement) {
+    if (catalogRevision === undefined) return;
+    const key = cardKey(card);
+    editButton.current = button;
+    setDrafts(current => current[key] ? current : { ...current, [key]: {
+      catalogRevision, dirty: false, questions: card.questions.map(question => ({
+        questionKey: question.questionKey, questionRevision: question.questionRevision,
+        prompt: question.prompt ?? '', acceptedAnswersText: question.acceptedAnswers.join('\n'),
+      })),
+    } });
+    setSelected(key);
+  }
+
+  function editPart(key: string, questionKey: string, patch: Partial<QuestionPartEdit>) {
+    setDrafts(current => ({ ...current, [key]: { ...current[key], dirty: true,
+      questions: current[key].questions.map(part => part.questionKey === questionKey ? { ...part, ...patch } : part),
+    } }));
+  }
+
+  if (!view) return <section className="round-panel">
+    <div className="section-heading console-heading"><h2>課堂回合</h2>{consoleAction}</div>
+    <p className="muted">{syncError || '正在連線並取得課堂狀態…'}</p></section>;
+  const showSettings = mode !== 'console';
+  const showConsole = mode !== 'settings';
+  const running = view.phase === 'active' || view.phase === 'reviewing';
+  const cards = (view.questionCards ?? []).map(card => {
+    const confirmed = saved[card.id];
+    return confirmed && confirmed.catalogRevision > (view.catalogRevision ?? -1) ? { ...card, ...confirmed.unit } : card;
+  });
+  const byId = new Map(cards.map(card => [card.id, card]));
+  const queued = (view.queueUnitIds ?? []).filter(id => byId.has(id));
+  const opened = queued.filter(id => byId.get(id)?.opened)
+    .sort((a, b) => (byId.get(a)?.questionNumber ?? 0) - (byId.get(b)?.questionNumber ?? 0));
+  const sortable = queued.filter(id => !byId.get(id)?.opened);
+  const queue = [...opened, ...sortable];
+  const next = view.nextUnitId ? byId.get(view.nextUnitId) : undefined;
+  const roundPath = view.roundId ? `/api/rounds/${view.roundId}` : undefined;
+  const title = view.phase === 'idle' && view.closedRoundIds.length ? '已定案' :
+    { idle: '尚未開題', preparing: '準備中', active: '進行中', reviewing: '待確認判分', ended: '已公布' }[view.phase];
+  const lastConfirmedRevision = Math.max(-1, ...Object.values(saved).map(result => result.catalogRevision));
+  const catalogRevision = view.catalogRevision === undefined ? undefined : Math.max(view.catalogRevision, lastConfirmedRevision);
+  const preparationIssue = blocked || awaitingSnapshot ? '請等待題目資料同步完成'
+    : !next ? '請先到題目管理加入題目'
+    : drafts[cardKey(next)]?.dirty ? '請先儲存題目修改'
+    : !view.groups?.length ? '請先建立分組'
+    : next.questions.some(question => question.missingPrompt) ? '請補齊題幹' : '';
+  const liveQuestions = view.unit?.questions ?? [];
+  const lostDrafts = Object.entries(drafts).filter(([key, draft]) => draft.dirty
+    && !cards.some(card => !card.opened && cardKey(card) === key));
+
+  function renderCard(card: QuestionCard, position: number) {
+    const key = cardKey(card);
+    const isManual = card.questions[0]?.origin === 'manual';
+    const draft = drafts[key];
+    const editing = selected === key && Boolean(draft) && !card.opened;
+    const stale = draft && (draft.catalogRevision !== catalogRevision || draft.questions.length !== card.questions.length
+      || card.questions.some(question => !draft.questions.some(part => part.questionKey === question.questionKey
+        && part.questionRevision === question.questionRevision)));
+    const grouped = hasQuestionParts(card.questions);
+    return <div className="question-card-content" data-grouped={grouped}>
+      <header className="question-card-heading">
+        <div><div className="unit-heading"><h3>{`出題順序 ${position + 1}`}</h3><QuestionKind grouped={grouped} count={card.questions.length} /></div>
+          {(card.opened || isManual) && <p className="muted">{card.opened ? '已開放' : '手動題'}</p>}</div>
+        {!card.opened && <div className="row-actions">
+          <button className="quiet question-icon" type="button" aria-label={editing ? '取消編修' : '編修題目'}
+            title={editing ? '取消編修' : '編修題目'} disabled={disabled || (running && !editing)} aria-expanded={editing}
+            onClick={event => editing ? closeEditor(key) : startEdit(card, event.currentTarget)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {editing ? <path d="m6 6 12 12M6 18 18 6" /> : <path d="m14 6 4 4M4 20l4-.8L20 7l-4-4L4.8 15z" />}
+            </svg>
+          </button>
+          <button className="quiet question-icon question-delete" type="button" aria-label="刪除題目" title="刪除題目" disabled={disabled}
+            onClick={event => {
+              setMessage('');
+              deleteTrigger.current = event.currentTarget;
+              setDeleting({ id: card.id, revision: catalogRevision });
+              deleteDialog.current?.showModal();
+            }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" />
+            </svg>
+          </button>
+        </div>}
+      </header>
+      {card.questions.map((question, index) => {
+        const part = draft?.questions.find(item => item.questionKey === question.questionKey);
+        return editing ? <fieldset className="form-stack question-editor question-block" key={question.questionKey} disabled={disabled || running}>
+          <legend>{grouped ? `第 ${index + 1} 部分` : '編修內容'}</legend>
+          <label>題幹<textarea rows={2} value={part?.prompt ?? question.prompt ?? ''} onChange={event => editPart(key, question.questionKey, { prompt: event.target.value })} /></label>
+          <label>標準答案（一行一種答案）<textarea rows={3} value={part?.acceptedAnswersText ?? question.acceptedAnswers.join('\n')} onChange={event => editPart(key, question.questionKey, { acceptedAnswersText: event.target.value })} /></label>
+          {stale && <p>目前題幹：{question.prompt ?? '缺少題幹'}<br />目前標準答案：{question.acceptedAnswers.join('、') || '尚未填寫'}</p>}
+        </fieldset> : <div className="question-block" key={question.questionKey}>
+          {grouped && <h4 className="part-label">第 {index + 1} 部分</h4>}
+          <p className="question-prompt">{question.prompt ?? '缺少題幹'}</p>
+          {!question.acceptedAnswers.length && <small className="question-incomplete">此題由老師判分</small>}
+          {draft?.dirty && <small className="question-incomplete">有未儲存修改</small>}
+        </div>;
+      })}
+      {editing && draft && <>
+        <AnswerSuggestions {...{ session, credential }} disabled={disabled || running || Boolean(stale)}
+          targets={draft.questions.map((part, index) => {
+            const label = draft.questions.length > 1 ? `第 ${index + 1} 部分（題號 ${card.questions[index]?.questionId ?? index + 1}）` : '單題';
+            return { id: part.questionKey, label, part: draft.questions.length > 1 ? label : undefined, prompt: part.prompt, text: part.acceptedAnswersText };
+          })}
+          onAccept={suggestions => setDrafts(current => {
+            const active = current[key];
+            if (!active) return current;
+            return { ...current, [key]: { ...active, dirty: true, questions: active.questions.map(q => ({ ...q,
+              acceptedAnswersText: fillBlankAnswer(suggestions, q.questionKey, q.prompt, q.acceptedAnswersText),
+            })) } };
+          })} />
+        {running && <p role="status">請先完成目前回合，再儲存題卡。</p>}
+        {stale && <><p role="status">題目清單已有更新，請核對最新題卡後再儲存。</p>
+          <button className="quiet" disabled={disabled || running} onClick={() => {
+            if (catalogRevision === undefined) return;
+            setDrafts(current => ({ ...current, [key]: { ...draft, catalogRevision,
+              questions: card.questions.map(question => ({
+                prompt: question.prompt ?? '', acceptedAnswersText: question.acceptedAnswers.join('\n'),
+                ...draft.questions.find(part => part.questionKey === question.questionKey),
+                questionKey: question.questionKey, questionRevision: question.questionRevision,
+              })),
+            } }));
+          }}>使用最新版本並保留輸入</button></>}
+        <button className="secondary-button" disabled={disabled || running || !draft.dirty || Boolean(stale)} onClick={() => {
+          const edit = { catalogRevision: draft.catalogRevision, questions: draft.questions };
+          void action(`/api/questions/units/${encodeURIComponent(card.id)}`, edit, 'PATCH', { id: card.id, key, edit });
+        }}>儲存修改</button>
+      </>}
+    </div>;
+  }
+
+  return <section className="round-panel">
+    {syncError && <p className="error" role="status">{syncError}</p>}
+    {message && <p className="work-message" role="status">{message}</p>}
+    {showSettings && <>
+      <div className="section-heading">
+        <h2 tabIndex={-1} ref={queueHeading}>出題清單</h2>
+        <ManualQuestion {...{ session, credential }} disabled={disabled || running} error={message}
+          onAdd={(prompt, acceptedAnswersText) => action('/api/questions', { prompt, acceptedAnswersText, catalogRevision })} />
+      </div>
+      <QuestionQueue items={queue} sortable={sortable} disabled={disabled} catalogRevision={catalogRevision}
+        onReorder={unitIds => action('/api/question-queue', { unitIds, catalogRevision }, 'PUT')}
+        renderItem={(id, index) => renderCard(byId.get(id)!, index)}
+        previewLabel={id => byId.get(id)?.questions[0]?.prompt ?? '缺少題幹'} />
+      {lostDrafts.length > 0 && <details className="question-editor">
+        <summary>已失效的草稿</summary>
+        {lostDrafts.flatMap(([, draft]) => draft.questions.map(part => <p key={part.questionKey}>{part.prompt}<br />{part.acceptedAnswersText}</p>))}
+      </details>}
+      <dialog ref={deleteDialog} className="work-dialog" aria-labelledby="delete-question-title" onClose={() => {
+        setDeleting(undefined);
+        if (deleteTrigger.current?.isConnected) deleteTrigger.current.focus();
+      }} onCancel={event => { if (busy) event.preventDefault(); }}>
+        <h2 id="delete-question-title">刪除題目</h2>
+        <p>這會移除題目卡及其出題清單項目。</p>
+        <div className="row-actions">
+          <button className="secondary-button" autoFocus disabled={busy} onClick={() => deleteDialog.current?.close()}>取消</button>
+          <button className="danger-button" disabled={!deleting || disabled || deleting.revision !== catalogRevision} onClick={async () => {
+            if (deleting && deleting.revision === catalogRevision && await action(
+              `/api/questions/units/${encodeURIComponent(deleting.id)}`, { catalogRevision: deleting.revision }, 'DELETE')) {
+              deleteTrigger.current = null;
+              deleteDialog.current?.close();
+              queueHeading.current?.focus();
+            }
+          }}>確認刪除</button>
+        </div>
+        {message && <p className="muted" role="status">{message}</p>}
+      </dialog>
+    </>}
+    <div hidden={!showConsole}>
+      <div className="section-heading console-heading"><h2>{title}</h2>
+        {!running && next && <button className="primary" disabled={disabled || Boolean(preparationIssue)}
+          onClick={() => void action('/api/rounds/open-next', { unitId: next.id, catalogRevision })}>開放搶答</button>}
+        {roundPath && view.phase === 'active' && <button className="danger-button" disabled={disabled}
+          onClick={() => void action(`${roundPath}/end`)}>結束搶答</button>}
+        {consoleAction}
+      </div>
+      {!running && next && <div className="next-question">
+        <div className="unit-heading"><h3>下一題</h3><QuestionKind grouped={hasQuestionParts(next.questions)} count={next.questions.length} /></div>
+        {next.questions.map((question, index) => <div key={question.questionKey} className="question-block">
+          {hasQuestionParts(next.questions) && <strong className="part-label">第 {index + 1} 部分</strong>}
+          <p className="question-prompt">{question.prompt ?? '缺少題幹'}</p></div>)}
+      </div>}
+      {!running && preparationIssue && <p className="work-message">{preparationIssue}。{' '}
+        {onSettings && <button className="secondary-button" onClick={onSettings}>前往題目管理</button>}
+      </p>}
+      <div className={view.phase === 'active' ? 'console-grid' : undefined}>
+        <div>
+          {running && liveQuestions.length > 0 && <section className="question-unit" data-grouped={hasQuestionParts(liveQuestions)}>
+            <QuestionKind grouped={hasQuestionParts(liveQuestions)} count={liveQuestions.length} />
+            {liveQuestions.map(question => <div key={question.questionId} className="question-block"><strong className="part-label">{questionLabel(question)}</strong><p className="question-prompt">{question.prompt}</p></div>)}
+          </section>}
+          {visibleReviews.map(snapshot => {
+            if (!snapshot.roundId || !snapshot.review) return null;
+            const path = `/api/rounds/${encodeURIComponent(snapshot.roundId)}`;
+            const carried = snapshot !== reviewView;
+            return <RoundReview key={JSON.stringify([scope, snapshot.roundId])} roundPath={path}
+              questions={snapshot.unit?.questions ?? []} groups={snapshot.groups ?? []} review={snapshot.review}
+              disabled={disabled} action={reviewAction} closed={carried || reviewIsClosed} refresh={refresh} completedRefresh={completedRefresh}
+              readRoundResult={readRoundResult} classMode={mode !== 'combined'}
+              onPublicationStarted={() => {
+                const key = JSON.stringify([scope, path]);
+                setPendingPublications(current => new Map(current).set(key, { scope, view: snapshot }));
+              }}
+              onPublicationSettled={settlePublication} onDismissResult={carried ? () => settlePublication(path) : undefined} />;
+          })}
+        </div>
+        {view.phase === 'active' && view.groups && <div className="group-progress">{view.groups.map(group => <article className="progress-card" key={group.id}>
+          <div><strong>{group.name}</strong><span className={group.received ? 'status received' : 'status'}>{group.received
+            ? `已送出 · 第 ${group.rank} 順位` : <SubmissionAvailability waitMs={group.waitRemainingMs} sampledAt={view.sampledAt} />}</span></div>
+          {group.answers?.map(answer => <p key={answer.questionId}><span>{questionLabel(view.unit?.questions?.find(question => question.questionId === answer.questionId) ?? answer)}</span>{answer.text}</p>)}
+        </article>)}</div>}
+      </div>
+      {showConsole && (session.classroomId || view.closedRoundIds.length > 0) && <RoundHistory session={session} credential={credential} roundIds={view.closedRoundIds} snapshot={fullSnapshot} />}
+    </div>
+  </section>;
+}

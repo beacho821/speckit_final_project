@@ -1,0 +1,24 @@
+@startuml
+!pragma layout smetana
+left to right direction
+title 自動補答與逐筆改判｜組件圖
+actor "老師" as Teacher
+actor "學生" as Student
+rectangle "題目標準答案設定" as Answers
+rectangle "回合收件" as Intake
+rectangle "教師審核與逐筆改判" as Review
+rectangle "逐題補答判定" as Supplement
+rectangle "舊回合已存人工補答" as Legacy
+rectangle "定案與結果" as Result
+Teacher --> Answers : 開題前設定
+Student --> Intake : 送出原答
+Teacher --> Review : 結束收件後核對與改判
+Intake --> Review : 原文、順位及自動判分
+Answers --> Supplement : 開題時設定的首個非空白答案
+Legacy --> Supplement : 仍欠答時優先保留原文
+Review --> Supplement : 依有效判定與資格重算預覽
+Supplement --> Review : 顯示來源及缺少來源的子題
+Review --> Result : 使用已儲存判分確認定案
+Supplement --> Result : 定案時重算並封存採用的補答
+Result --> Student : 公布可見結果
+@enduml

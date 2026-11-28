@@ -1,0 +1,78 @@
+@startuml
+skinparam defaultFontName PingFang TC
+title 恢復教室、搶答與定案
+actor 老師 as Teacher
+actor 學生 as Student
+actor 投影裝置 as Screen
+participant 課堂服務 as Service
+database 教室存檔 as Saved
+database 非機敏發碼世代 as IssuanceEpoch
+Service -> IssuanceEpoch : 啟動時提交下一發碼世代
+IssuanceEpoch --> Service : 成功後才允許加入碼發放與驗證
+Service -> Saved : 啟動時載入各教室
+Saved --> Service : 分組、題目與挑戰紀錄
+opt 重啟前回合仍在收件
+  Service -> Saved : 嘗試保留收件並轉為待審核
+  alt 轉換寫入成功
+    Saved --> Service : 啟用已恢復教室
+  else 轉換寫入失敗
+    Saved --> Service : 保留原檔及原順位
+    Service -> Service : 只停用受影響教室的恢復、收件與加入
+  end
+end
+Teacher -> Service : 建立教室或恢復主持
+Service --> Teacher : 教室管理及活動進度
+opt 目前無收件中或待審核回合且未回填
+  Teacher -> Service : 開始新活動
+  Service -> Saved : 保留歷史並沿用分組
+  Service --> Teacher : 新活動與可編輯的分組
+end
+Student -> Service : 驗證學生加入碼世代、用途與名稱
+Service --> Student : 等待老師準備題目與組別
+alt 已登入的老師開啟全班投影
+  Teacher -> Service : 開啟全班投影
+  Service --> Screen : 全班投影的階段
+else 獨立裝置輸入組別投影碼
+  Screen -> Service : 驗證當次活動的組別投影碼
+  Service --> Screen : 指定組別投影的階段
+end
+Teacher -> Teacher : 檢查目前分頁的共用備課就緒狀態
+Teacher -> Service : 開放搶答
+Service -> Saved : 儲存回合狀態
+Service --> Student : 題組、題幹與可送答狀態
+Service --> Screen : 已開放的題目
+Student -> Service : 送出本組答案
+alt 第一份有效答案
+  Service -> Saved : 儲存收件與順位
+  Service --> Student : 本組已鎖定送出及接受的答案
+  Service --> Screen : 授權範圍內的收件狀態
+else 缺答、重送或已停止收件
+  Service --> Student : 拒絕原因與目前狀態
+end
+Teacher -> Service : 結束搶答並審核
+Teacher -> Service : 判對錯、調整資格與必要補答
+Service -> Saved : 儲存審核變更
+Teacher -> Service : 確認定案
+alt 審核完整且版本有效
+  Service -> Saved : 儲存定案結果
+  Service --> Teacher : 已定案答案
+  Service --> Screen : 已公布摘要
+else 缺補答或版本過期
+  Service --> Teacher : 顯示修正提示
+end
+opt Google 回填
+  Teacher -> Service : 回填目前活動的結果
+  alt 同一工作表已有回填
+    Service --> Teacher : 409 此工作表正在回填
+  else 已取得該工作表的處理權
+    Service -> Service : 綁定教室與活動，讀取並比對來源
+    opt 回填中嘗試在該教室換場或刪除
+      Teacher -> Service : 換場或刪除教室
+      Service --> Teacher : 409 回填進行中，請稍後再試
+    end
+    Service -> Service : 來源一致才寫入並讀回確認
+    Service -> Service : 釋放工作表及教室標記
+    Service --> Teacher : 確認結果或衝突提示
+  end
+end
+@enduml

@@ -1,0 +1,90 @@
+@startuml
+skinparam defaultFontName "STHeiti"
+title 改善教室操作與活動結算｜時序圖
+actor 教師 as Teacher
+participant "教師工作區" as Workspace
+participant "教室投影" as Screen
+participant "目前活動" as Activity
+participant "學生歷史紀錄" as History
+actor 學生 as Student
+
+group 登入及投影
+  Teacher -> Workspace : 登入後選教室
+  Workspace --> Teacher : 顯示分組管理
+  Teacher -> Workspace : 開啟教室投影
+  Workspace -> Screen : 開啟所選教室的唯讀投影
+  Screen -> Activity : 取得授權範圍內的公開狀態
+  Activity --> Screen : 顯示題目及收件狀態
+  alt 偵測到斷線通知或請求逾時
+    Screen -> Screen : 保留最後畫面並標示重新連線中
+    opt 偵測到斷線後 10 秒仍未恢復
+      Screen -> Screen : 清除教室內容並繼續重連
+    end
+    Screen -> Activity : 恢復通知或偵測逾時後讀取完整快照
+    Activity --> Screen : 更新同一教室的投影
+  else 原教師視窗仍開著但沒有傳來狀態
+    Screen -> Workspace : 向原教師視窗要求狀態
+    opt 等待後仍無有效回應
+      Screen -> Screen : 清除內容並顯示重開指引
+    end
+  else 已收到登出通知或確認教師登入失效
+    Screen -> Screen : 立即清除內容並提供登入指引
+  end
+end
+
+group 編修及排序
+  Teacher -> Workspace : 選編修圖示，按儲存修改
+  Workspace -> Activity : 驗證並儲存整張題卡的修改
+  alt 全部儲存成功
+    Activity --> Workspace : 回傳最新題卡
+    Workspace --> Teacher : 離開編修模式
+  else 儲存回應未送達
+    Workspace -> Activity : 重新取得同一題卡的完整資料
+    Activity --> Workspace : 回傳目前已存內容
+    alt 所有部分均與提交內容相符
+      Workspace --> Teacher : 顯示已存內容並離開編修
+    else 內容不同或題卡失效
+      Workspace --> Teacher : 保留草稿並提示核對
+    end
+  else 無效或儲存失敗
+    Activity --> Workspace : 回報原因
+    Workspace --> Teacher : 保留輸入及編修模式
+  end
+  Teacher -> Workspace : 拖曳題卡
+  Workspace --> Teacher : 顯示題卡預覽及插入位置
+  Teacher -> Workspace : 放開於有效位置
+  Workspace -> Activity : 儲存新順序
+  Teacher -> Workspace : 選紅色垃圾桶圖示
+  Workspace --> Teacher : 顯示刪除確認
+  opt 確認刪除可操作的題卡
+    Teacher -> Workspace : 確認刪除
+    Workspace -> Activity : 移除題卡及清單項目
+  end
+end
+
+group 公布及結算
+  Teacher -> Activity : 完成審核並定案
+  Student -> History : 查看已公布紀錄
+  History -> Activity : 讀取本組逐題結果
+  History --> Student : 呈現文字與顏色
+  Teacher -> Workspace : 選取結算
+  Workspace -> Activity : 核對回合階段
+  alt 無收件中或待審核回合
+    Workspace --> Teacher : 顯示回填、匯出及開始新活動
+    opt 發起回填
+      Teacher -> Workspace : 請求回填目前活動
+      Workspace -> Activity : 回填並等候結果
+      Workspace -> Workspace : 返回主持再進結算仍共用回填狀態
+      Activity --> Workspace : 此活動的回填結果
+    end
+    opt 確認開始新活動
+      Teacher -> Workspace : 確認開始
+      Workspace -> Activity : 保存舊紀錄並開始新活動
+      Activity --> Workspace : 新活動已建立
+      Workspace --> Teacher : 回到主持畫面
+    end
+  else 尚有未完成回合
+    Workspace --> Teacher : 說明待完成步驟
+  end
+end
+@enduml

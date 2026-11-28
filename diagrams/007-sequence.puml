@@ -1,0 +1,48 @@
+@startuml
+title 教師定案與學生倒數提示｜時序圖
+actor "教師" as Teacher
+participant "審核操作區" as Review
+participant "課堂回合" as Round
+participant "學生作答區" as Answer
+actor "學生" as Student
+
+Round -> Answer : 開始收件並顯示本組等待
+Student -> Answer : 等待時先填答
+alt 倒數歸零，仍在收件
+  Answer -> Student : 保留草稿並開放送出
+  Student -> Answer : 手動送出
+  Answer -> Round : 送出答案
+else 等待期間已停止收件
+  Answer -> Student : 顯示已停止收件
+end
+
+Teacher -> Review : 結束收件並審核
+Review -> Teacher : 列出待補答題號與定案條件
+opt 有需儲存的改判或補答
+  Teacher -> Review : 編輯並儲存
+  Review -> Round : 儲存審核
+  alt 已成功儲存
+    Round --> Review : 最新判分與缺答狀態
+  else 失敗或較舊的審核內容
+    Round --> Review : 顯示原因並保留草稿
+    opt 兩個分頁修改同一筆為不同值
+      Review -> Teacher : 並列已存值與草稿值
+      Teacher -> Review : 逐筆選擇，再儲存
+      Review -> Round : 附最新審核版本儲存
+    end
+  end
+end
+opt 已符合定案條件
+  Teacher -> Review : 確認定案
+  Review -> Teacher : 就地顯示定案中
+  Review -> Round : 確認審核狀態並定案
+  alt 定案成功
+    Round --> Review : 已定案、勝組或無勝組
+  else 遭拒
+    Review -> Teacher : 就地顯示原因與下一步
+  else 暫時無法確認
+    Review -> Round : 取得新快照並查核同一回合
+    Review -> Teacher : 顯示結果或可重試狀態
+  end
+end
+@enduml
