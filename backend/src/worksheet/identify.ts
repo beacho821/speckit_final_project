@@ -40,6 +40,9 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
     if(q&&a){headerRow=row.number;questionColumn=q;answerColumn=a;promptColumn=p;}
   });
 
+  // 合併的作答表頭可同時涵蓋小題編號及右側答案格。
+  const answerHasDetailColumn = answerColumn > 0 && answerColumn < sheet.columnCount
+    && master(headerRow, answerColumn + 1).address === master(headerRow, answerColumn).address;
   const fills: FillBlank[] = [];
   const fillsByRow = new Map<number, FillBlank>();
   const sharedPrompts: Array<{ fill: FillBlank; anchorRow: number }> = [];
@@ -48,7 +51,14 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
   const seenTargets = new Set<string>();
   let currentMain = '';
   const startRow = headerRow ? headerRow + 1 : 1;
-  for (let rowNumber = startRow; rowNumber <= sheet.rowCount; rowNumber += 1) {
+  const noteColumns = new Map<number, number>();
+  let endRow = sheet.rowCount;
+  for (const address of notes.keys()) {
+    const [row, column] = address.split(':').map(Number);
+    noteColumns.set(row, Math.max(column, noteColumns.get(row) ?? 0));
+    endRow = Math.max(endRow, row);
+  }
+  for (let rowNumber = startRow; rowNumber <= endRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
     const questionRaw = questionColumn ? cellValue(rowNumber, questionColumn).trim() : '';
     const answerCell = answerColumn ? master(rowNumber, answerColumn) : undefined;
@@ -58,18 +68,22 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
       ? promptCandidate : undefined;
     if (questionColumn && isFormula(master(rowNumber,questionColumn).value)) throw new DomainError(422,'FORMULA_IDENTITY','題號不能使用公式，請改為明確文字或數字。');
     const answerRaw = answerCell ? cellValue(rowNumber, answerColumn) : '';
+    const answerSub = answerRaw.trim().match(/^[（(](\d+)[）)]$/);
+    const detailCell = answerHasDetailColumn && answerSub ? master(rowNumber, answerColumn + 1) : undefined;
+    const separateAnswer = detailCell?.fullAddress.row === rowNumber && detailCell.fullAddress.col === answerColumn + 1
+      ? detailCell : undefined;
     const cells = row.values as unknown[];
     let markedCell: ExcelJS.Cell | undefined;
     let markedUnit = '';
     let markedQuestion = '';
     let markedNote = '';
     let targetNote = '';
-    for (let column = 1; column < cells.length; column += 1) {
+    for (let column = 1; column <= Math.max(cells.length - 1, noteColumns.get(rowNumber) ?? 0, row.cellCount); column += 1) {
       const cell = master(rowNumber,column);
       if(cell.fullAddress.row !== rowNumber || cell.fullAddress.col !== column || cell.address === promptCell?.address) continue;
       const cellText = textOf(cell.value).trim();
       const note = notes.get(`${rowNumber}:${column}`) ?? noteOf(cell.note);
-      if (cell.address === answerCell?.address) targetNote = note;
+      if (cell.address === (separateAnswer ?? answerCell)?.address) targetNote = note;
       const mark = cellText.match(markerPattern);
       const noteMark = note.match(notePattern);
       if (mark || noteMark) {
@@ -95,9 +109,8 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
       targetCell = markedCell;
       identitySource = markedNote.match(notePattern) ? 'note' : 'marker';
     } else if (answerCell) {
-      let inferredSub: string | undefined;
-      const answerSub = answerRaw.match(/^\s*[（(](\d+)[）)]\s*$/);
-      if (answerSub) inferredSub = answerSub[1];
+      const inferredSub = answerSub?.[1];
+      targetCell = separateAnswer ?? answerCell;
       const main = questionRaw || currentMain;
       if (!main) continue;
       parsed = parseQuestion(main, inferredSub);
@@ -114,6 +127,7 @@ export function identifyWorksheet(sheet: ExcelJS.Worksheet, notes: Map<string, s
     const value = targetCell.value;
     const fill: FillBlank = {
       id: fillId, ...parsed, unitId, row: targetCell.fullAddress.row, column: targetCell.fullAddress.col,
+      ...(targetCell === separateAnswer ? { subLabelColumn: answerColumn } : {}),
       originalValue: value ?? null,
       originalType: value === null || value === undefined ? 'blank' : typeof value === 'object' && 'formula' in value ? 'formula' : typeof value === 'object' && 'richText' in value ? 'richText' : typeof value,
       ...(targetNote || markedNote ? { note: targetNote || markedNote } : {}), identitySource,

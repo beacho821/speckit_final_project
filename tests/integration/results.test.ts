@@ -17,6 +17,7 @@ it('舊回合的人工補答與自動補答一同封存，角色結果與 CSV �
     await c.request('/rounds/' + round.id + '/end', c.teacher, undefined, 'POST');
     const [first, second] = unit.questions.map(question => question.questionId);
     const legacy = '  原有補答,含"引號"\n下一行  ';
+    delete c.activity.rounds[0].optionalSupplements;
     c.activity.rounds[0].supplements = [{ questionId: first, text: legacy }];
     const view = await (await c.request('/view')).json();
     expect(view.review.supplementCandidates).toEqual([
@@ -117,15 +118,15 @@ describe('結果與回填端點整合', () => {
       expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
       const csv = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const rows = csv.trim().split(/\r?\n/);
-      expect(rows).toHaveLength(21);
+      expect(rows).toHaveLength(19);
       expect(rows[0]).toBe('題號,組別,答案,搶答順位,作答狀態,正誤');
       expect(csv).toContain('=答案,保留');
       expect(csv).toContain('""引號""內容"');
-      expect(rows.filter(row => row.startsWith('3,')).length).toBe(4);
+      expect(rows.filter(row => row.startsWith('3,')).length).toBe(3);
       expect(rows.filter(row => row.startsWith('3,') && row.endsWith(',,,未送出,'))).toHaveLength(2);
       expect(rows).toContain('3,丙組,未列出的答案,1,已送出,答錯');
-      expect(rows).toContain('3,,勝組-3,,老師補答,');
-      expect(rows).toContain('4,,答案,,老師補答,');
+      expect(rows).not.toContain('3,,勝組-3,,老師補答,');
+      expect(rows).not.toContain('4,,答案,,老師補答,');
       expect(c.activity.rounds.filter(round => round.phase === 'ended')).toHaveLength(4);
     } finally { fillsRow = 2; await c.close(); }
   });

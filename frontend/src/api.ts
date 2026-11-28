@@ -1,6 +1,7 @@
 import type { SessionResponse, StudentRoundResultLine } from '../../shared/api';
 
-export function basicHeader(role: string, credential: string) {
+export function basicHeader(role: string, credential: string, login = false) {
+  if (!login && role === "teacher" && credential.startsWith("session:")) return "Bearer " + credential.slice(8);
   const bytes = new TextEncoder().encode(`${role}:${credential}`);
   let binary = '';
   bytes.forEach(byte => { binary += String.fromCharCode(byte); });

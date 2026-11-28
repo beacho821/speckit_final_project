@@ -46,7 +46,9 @@ export function makeView(activity: Activity, identity: Identity, now = performan
     if (round?.phase === 'reviewing') common.review = reviewFor(round);
     common.groups = round?.roster.map(group => {
       const submission = round.submissions.find(item => item.groupId === group.id);
-      return { id: group.id, name: group.name, received: Boolean(submission), ...(submission ? { rank: submission.rank, ...(submission.disqualified ? { disqualified: true } : {}), answers: submission.answers.map(answer => ({
+      return { id: group.id, name: group.name, received: Boolean(submission),
+        ...(round.phase === 'active' ? { waitRemainingMs: remainingWait(round, group.id, now) } : {}),
+        ...(submission ? { rank: submission.rank, ...(submission.disqualified ? { disqualified: true } : {}), answers: submission.answers.map(answer => ({
         questionId: answer.questionId,
         text: answer.text,
         ...(round.phase === 'reviewing' ? { autoCorrect: answer.autoCorrect, correct: finalCorrectness(answer) } : {}),
@@ -66,6 +68,9 @@ export function makeView(activity: Activity, identity: Identity, now = performan
       return { questionId, text, correct, ...(correct === false ? { publishedAnswer: published.get(questionId) } : {}) };
     });
     common.waitRemainingMs = round?.phase === 'active' ? remainingWait(round, groupId, now) : 0;
+    if (round?.phase === 'active' && round.openedAt !== undefined) {
+      common.cooldownMs = Math.max(0, Math.round((round.openAtByGroup[groupId] ?? round.openedAt) - round.openedAt));
+    }
   }
   return common;
 }

@@ -39,6 +39,24 @@ it('老師可以在題卡直接編修改題幹及標準答案', async () => {
   expect(field?.labels?.[0]?.textContent).toContain('標準答案');
 });
 
+it('題組使用一個 AI 視窗，只補有題幹的空白小題，原答案完整保留', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ answers: ['中央處理器', 'CPU'] }));
+  const questions = [question, { ...question, questionKey: 'part2', questionId: '1（2）', prompt: 'CPU 的中文名稱？', acceptedAnswers: [] },
+    { ...question, questionKey: 'part3', prompt: null, missingPrompt: true, acceptedAnswers: [] }];
+  await show({ ...view, queueUnitIds: ['u'], questionCards: [{ ...view.questionCards![0], questions }] });
+  await click('編修題目');
+  const launcher = host.querySelector<HTMLButtonElement>('[data-queue-id="u"] button[aria-haspopup="dialog"]')!;
+  await act(async () => launcher.click());
+  expect(host.querySelectorAll('.ai-answer-dialog input')).toHaveLength(1);
+  await click('產生建議');
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toMatchObject({ prompt: 'CPU 的中文名稱？', part: expect.stringContaining('1（2）') });
+  await click('加入標準答案');
+  const fields = [...host.querySelectorAll('fieldset.question-editor')].map(part => part.querySelectorAll('textarea')[1].value);
+  expect(fields).toEqual(['甲\n乙', '中央處理器\nCPU', '']);
+  expect(launcher.disabled).toBe(true);
+});
+
 it('跨分頁換來源後仍可看見失效草稿，新題可以獨立開題', async () => {
   await show(view);
   await click('編修題目');

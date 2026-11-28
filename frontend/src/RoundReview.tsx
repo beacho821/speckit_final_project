@@ -27,7 +27,8 @@ function winnerFromResult(data: unknown): string | null | undefined {
   }));
 }
 
-function displayValue(field: ReviewField, value: boolean) {
+function displayValue(field: ReviewField, value: boolean | undefined) {
+  if (value === undefined) return "待教師判分";
   if (field.kind === 'grade') return value ? '正確' : '錯誤';
   return value ? '已取消資格' : '有資格';
 }
@@ -52,6 +53,7 @@ export default function RoundReview({
   onDismissResult?: () => void;
 }) {
   const [draft, setDraft] = useState<ReviewDraft>(() => new Map());
+  const [choices, setChoices] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Feedback>();
   const [requested, setRequested] = useState<'save' | 'publish'>();
   const [pending, setPending] = useState<Pending>();
@@ -117,7 +119,7 @@ export default function RoundReview({
   }, [pending, finalized, completedRefresh, review.reviewRevision, saved, roundPath, onPublicationSettled]);
 
   function savedValue(field: ReviewField) {
-    return saved.get(fieldKey(field)) ?? false;
+    return saved.get(fieldKey(field));
   }
 
   function edit(field: ReviewField, value: boolean) {
@@ -146,7 +148,7 @@ export default function RoundReview({
     })).map(answer => answer.questionId)));
   const { selected, missingSupplementQuestionIds } = selectReviewSupplements(questions, correctIds, review.supplementCandidates);
   const changes: ReviewChanges = { reviewRevision: review.reviewRevision, grades: [] };
-  const needingReview: Array<{ field: ReviewField; saved: boolean; value: boolean }> = [];
+  const needingReview: Array<{ field: ReviewField; saved: boolean | undefined; value: boolean | undefined }> = [];
   const fieldsToReview = new Set<string>();
   for (const entry of draft.values()) {
     const { field } = entry;
@@ -157,12 +159,15 @@ export default function RoundReview({
       fieldsToReview.add(fieldKey(field));
     }
     if (!comparison.changed) continue;
-    if (field.kind === 'grade') changes.grades.push({ groupId: field.groupId, questionId: field.questionId, correct: comparison.value });
-    else (changes.eligibility ??= []).push({ groupId: field.groupId, disqualified: comparison.value });
+    if (field.kind === 'grade') changes.grades.push({ groupId: field.groupId, questionId: field.questionId, correct: entry.value });
+    else (changes.eligibility ??= []).push({ groupId: field.groupId, disqualified: entry.value });
   }
   const unsaved = Boolean(changes.grades.length || changes.eligibility?.length);
   const canSave = !locked && unsaved && needingReview.length === 0;
-  const canPublish = !locked && !unsaved && needingReview.length === 0;
+  const ungraded = groups.some(group => group.received && !effectiveValue({ kind: 'eligibility', groupId: group.id }) &&
+    group.answers?.some(answer => effectiveValue({ kind: 'grade', groupId: group.id, questionId: answer.questionId }) === undefined));
+  const missingChoices = Object.entries(choices).some(([id, text]) => !correctIds.has(id) && !text.trim());
+  const canPublish = !ungraded && !missingChoices && !locked && !unsaved && needingReview.length === 0;
 
   async function submit(kind: 'save' | 'publish') {
     if (request.current || (kind === 'save' ? !canSave : !canPublish)) return;
@@ -174,7 +179,9 @@ export default function RoundReview({
     try {
       const result = kind === 'save'
         ? await action(roundPath + '/review', changes, 'PATCH', controller.signal)
-        : await action(roundPath + '/publish', { reviewRevision: review.reviewRevision }, 'POST', controller.signal);
+        : await action(roundPath + '/publish', { reviewRevision: review.reviewRevision,
+          ...(review.optionalSupplements ? { supplements: Object.entries(choices).filter(([id]) => !correctIds.has(id)).map(([questionId, text]) => ({ questionId, text })) } : {}),
+        }, 'POST', controller.signal);
       if (controller.signal.aborted) return;
       const data = result.kind === 'ok' ? result.data : undefined;
       if (kind === 'publish' && data && typeof data === 'object' && 'id' in data && 'phase' in data && 'winnerGroupId' in data
@@ -249,18 +256,38 @@ export default function RoundReview({
               return <div key={fieldKey(field)} className="form-stack" role="group" aria-label={label}>
                 <strong>{label}</strong>
                 <p className="question-prompt">{answer.text}</p>
-                <p>自動判分：{answer.autoCorrect ? '答對' : '答錯'}</p>
+                <p>自動判分：{answer.autoCorrect === undefined ? '待教師判分' : answer.autoCorrect ? '答對' : '答錯'}</p>
                 <div className="row-actions review-grade">
-                  <button type="button" className="secondary-button" aria-pressed={!correct} disabled={needsReview}
+                  <button type="button" className="secondary-button" aria-pressed={correct === false} disabled={needsReview}
                     onClick={() => edit(field, false)}>錯誤</button>
-                  <button type="button" className="secondary-button" aria-pressed={correct} disabled={needsReview}
+                  <button type="button" className="secondary-button" aria-pressed={correct === true} disabled={needsReview}
                     onClick={() => edit(field, true)}>正確</button>
                 </div>
               </div>;
             })}
           </section>;
         })}
-        {!finalized && (selected.length > 0 || missingSupplementQuestionIds.length > 0) && <section className="form-stack review-supplements" aria-label="補答預覽">
+        {!finalized && review.optionalSupplements && questions.some(q => !correctIds.has(q.questionId)) && <section className="form-stack" aria-label="學習單補答">
+          <h3>學習單補答</h3>
+          {questions.filter(q => !correctIds.has(q.questionId)).map(q => {
+            const id = q.questionId;
+            const chosen = choices[id] !== undefined;
+            const suggestion = review.supplementCandidates.find(item => item.questionId === id)?.text ?? '';
+            return <div key={id} className="form-stack"><label className="supplement-choice"><input type="checkbox" checked={chosen}
+              onChange={event => {
+                const checked = event.target.checked;
+                setChoices(previous => {
+                  const next = { ...previous };
+                  if (checked) next[id] = suggestion; else delete next[id];
+                  return next;
+                });
+              }} /> {questionLabel(q)} · 補答到學習單</label>
+              {chosen && <label>補答內容<textarea maxLength={4000} value={choices[id]} onChange={event => setChoices({ ...choices, [id]: event.target.value })} /></label>}
+            </div>;
+          })}
+          {missingChoices && <p>請填寫補答，或取消勾選以留白。</p>}
+        </section>}
+        {!finalized && !review.optionalSupplements && (selected.length > 0 || missingSupplementQuestionIds.length > 0) && <section className="form-stack review-supplements" aria-label="補答預覽">
           <h3>補答預覽</h3>
           {selected.map(item => <div key={item.questionId}>
             <strong>{questionLabel(questionById.get(item.questionId) ?? item)} · {item.source === 'legacy' ? '老師補答' : '自動補答'}</strong>
@@ -287,6 +314,7 @@ export default function RoundReview({
             {needingReview.length > 0 && <p role="status">其他分頁已更新判分。請逐筆核對後再儲存或定案。</p>}
             {unsaved && !requested && !pending && <p>修改尚未儲存。</p>}
             {disabled && !requested && !pending && <p>操作暫停，請等待課堂狀態確認。</p>}
+            {ungraded && <p>請完成待教師判分的作答並儲存。</p>}
             {canPublish && <p>審核完成，可定案。</p>}
           </div>
           {needingReview.map(({ field, saved: latest, value }) => {

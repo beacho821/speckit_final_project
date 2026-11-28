@@ -21,9 +21,31 @@ it('教師導覽按指定順序呈現，三頁皆可一鍵開啟教室投影', a
   expect(groups.map(a => a.pathname)).toEqual(['/teacher/classrooms/room/groups']);
   for (const path of ['/teacher/classrooms/room', '/teacher/classrooms/room/console', '/teacher/classrooms/room/groups']) {
     await render(<TeacherPortal {...props} path={path} />);
-    const nav = [...host.querySelectorAll<HTMLAnchorElement>('nav a')];
+    const nav = [...host.querySelectorAll<HTMLAnchorElement>('.classroom-nav a')];
     expect(nav.map(link => link.textContent)).toEqual(['分組管理', '題目管理', '老師控制台', '開啟教室投影']);
     expect(nav[3].pathname).toBe('/teacher/classrooms/room/projection');
+    const pager = host.querySelector('.workspace-pager')!;
+    expect(pager.matches('.work-panel > :last-child')).toBe(true);
+    const prev = pager.querySelector<HTMLAnchorElement>('a[rel="prev"]');
+    if (path.endsWith('/groups')) {
+      expect(prev).toBeNull();
+    } else {
+      const target = path.endsWith('/console') ? nav[1] : nav[0];
+      expect(prev?.textContent).toBe('上一頁' + target.textContent);
+      expect(prev?.pathname).toBe(target.pathname);
+      prev!.click();
+      expect(navigate).toHaveBeenLastCalledWith(target.pathname);
+    }
+    const next = pager.querySelector<HTMLAnchorElement>('a[rel="next"]');
+    if (path.endsWith('/console')) {
+      expect(next).toBeNull();
+    } else {
+      const target = path.endsWith('/groups') ? nav[1] : nav[2];
+      expect(next?.textContent).toBe('下一頁' + target.textContent);
+      expect(next?.pathname).toBe(target.pathname);
+      next!.click();
+      expect(navigate).toHaveBeenLastCalledWith(target.pathname);
+    }
     nav[3].click();
   }
   expect(props.openProjection).toHaveBeenCalledTimes(3);
@@ -53,6 +75,7 @@ it.each([
   await render(<TeacherPortal credential="測試密碼" path="/teacher/classrooms/room/console" {...{ navigate }} logout={vi.fn()} openProjection={vi.fn()} />);
   await flush();
   const button = [...host.querySelectorAll('button')].find(node => node.textContent === '結算')!;
+  expect(button.closest('.console-heading')?.querySelector('h2')).toBeTruthy();
   expect(button.disabled).toBe(Boolean(hint));
   expect(host.querySelector('#settlement-hint')?.textContent).toBe(hint);
   expect(host.textContent).not.toContain('回填與匯出');
@@ -138,7 +161,7 @@ it('Google 回填中不能換場，拒絕編輯後提示權限並保留結算', 
   await render(<TeacherPortal credential="測試" path="/teacher/classrooms/room/console"
     navigate={vi.fn()} logout={logout} openProjection={vi.fn()} />);
   await click('結算');
-  await click('將勝組答案回填原稿');
+  await click('將定案答案回填原稿');
   expect([...host.querySelectorAll('button')].find(button => button.textContent === '開始新活動')?.disabled).toBe(true);
   const { act } = await import('react');
   await act(async () => finish(Response.json({
@@ -173,17 +196,17 @@ it('回填請求跨結算檢視維持互斥，離開教室後忽略遲到的認�
   const button = (name: string) => [...host.querySelectorAll('button')].find(node => node.textContent === name)!;
   await show('room');
   await click('結算');
-  await click('將勝組答案回填原稿');
+  await click('將定案答案回填原稿');
   await click('返回主持');
   await click('結算');
-  expect(button('將勝組答案回填原稿').disabled).toBe(true);
+  expect(button('將定案答案回填原稿').disabled).toBe(true);
   expect(button('開始新活動').disabled).toBe(true);
-  await click('將勝組答案回填原稿');
+  await click('將定案答案回填原稿');
   expect(replies).toHaveLength(1);
   await act(async () => replies[0](Response.json({ written: ['1'], alreadyMatched: [], noWinner: [] })));
   expect(host.textContent).toContain('回填完成');
   expect(button('開始新活動').disabled).toBe(false);
-  await click('將勝組答案回填原稿');
+  await click('將定案答案回填原稿');
   await show('other');
   await act(async () => replies[1](Response.json({ code: 'UNAUTHORIZED' }, { status: 401 })));
   expect(logout).not.toHaveBeenCalled();

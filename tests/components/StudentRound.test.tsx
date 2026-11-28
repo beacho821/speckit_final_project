@@ -146,33 +146,37 @@ describe('學生作答互動', () => {
     expect(host!.textContent).toContain('第 3 題，第 2 部分尚未填答'); expect(first.value).toBe('保留的答案'); expect(host!.textContent).not.toContain('本組答案已收件');
   });
 
-  it('等待時可編輯草稿，恢復分頁後按實際時間開放，拒收時校正等待', async () => {
+  it('冷卻鎖住所有小題和送出，期滿開放，伺服器校正時再鎖住並保留已填內容', async () => {
     const time = vi.spyOn(performance, 'now').mockReturnValue(0);
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ code: 'WAIT_REQUIRED',
       message: '本組須等待。', details: { waitRemainingMs: 1000 },
     }, { status: 409 })).mockResolvedValueOnce(Response.json({ received: true }, { status: 201 }));
     await mount({ ...baseView, waitRemainingMs: 3000 });
     const submit = host!.querySelector('button')!;
-    expect(host!.textContent).toContain('其他組別優先送出中');
+    expect(host!.textContent).toContain('冷卻中，可先讀題');
+    expect([...host!.querySelectorAll('textarea')].every(field => field.disabled)).toBe(true);
     expect(submit.disabled).toBe(true);
     const field = host!.querySelector('textarea')!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, '  原文  ');
-      field.dispatchEvent(new Event('input', { bubbles: true }));
-      submit.click();
-    });
+    await act(async () => submit.click());
     expect(fetch).not.toHaveBeenCalled();
     time.mockReturnValue(2999);
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
-    expect(host!.textContent).toContain('還有 1 秒');
+    expect(field.disabled).toBe(true);
     time.mockReturnValue(3000);
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect([...host!.querySelectorAll('textarea')].every(input => !input.disabled)).toBe(true);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, '  原文  ');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     await act(async () => submit.click());
     expect(submit.disabled).toBe(true);
+    expect(field.disabled).toBe(true);
     expect(host!.textContent).toContain('答案草稿已保留');
     expect(field.value).toBe('  原文  ');
     time.mockReturnValue(4000);
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(field.disabled).toBe(false);
     await act(async () => submit.click());
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(fetch.mock.calls[1][1]?.body)).answers[0].text).toBe('  原文  ');
@@ -188,6 +192,18 @@ describe('學生作答互動', () => {
     expect(host!.textContent).toContain('已停止收件');
     expect(host!.querySelector('button')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('顯示分配給本組的 5.75 秒冷卻，重連只等待伺服器回報的剩餘時間', async () => {
+    const time = vi.spyOn(performance, 'now').mockReturnValue(100);
+    await mount({ ...baseView, cooldownMs: 5750, waitRemainingMs: 250 });
+    expect(host!.textContent).toContain('本組本回合冷卻 5.75 秒');
+    const submit = host!.querySelector('button')!;
+    expect(submit.disabled).toBe(true);
+    time.mockReturnValue(350);
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(submit.disabled).toBe(false);
+    expect(host!.textContent).toContain('冷卻已結束');
   });
 });
 

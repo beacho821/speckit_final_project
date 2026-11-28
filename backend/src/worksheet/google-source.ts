@@ -45,7 +45,7 @@ export async function importGoogleWorksheet(config: AppConfig, input: unknown, s
   try {
     const [exportResponse, sheetResponse] = await Promise.all([
       driveApi.files.export({ fileId: documentId, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, { responseType: 'arraybuffer' }),
-      sheetsApi.spreadsheets.get({ spreadsheetId: documentId, ranges: [selected.title], includeGridData: true, fields: 'sheets(properties(sheetId,title),data(rowData(values(userEnteredValue,note))))' }),
+      sheetsApi.spreadsheets.get({ spreadsheetId: documentId, ranges: [selected.title], includeGridData: true, fields: 'sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(userEnteredValue,note))))' }),
     ]);
     exported = Buffer.from(exportResponse.data as ArrayBuffer);
     if (exported.byteLength > 10 * 1024 * 1024) throw new DomainError(413, 'SHEET_TOO_LARGE', '試算表匯出超過 10 MB，請複製需要的工作表到較小的課堂副本。');

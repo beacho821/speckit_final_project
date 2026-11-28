@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActivityView, SessionResponse } from '../../shared/api';
 import { activityHeaders } from './api';
+import type { TimedSnapshot } from './SubmissionAvailability';
 
 export function useActivityView(session: SessionResponse | null, credential: string, onExpired: (reason: 'authorization' | 'activity') => void) {
-  const [view, setView] = useState<ActivityView | null>(null);
+  const [view, setView] = useState<TimedSnapshot<ActivityView> | null>(null);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [fullSnapshot, setFullSnapshot] = useState(0);
@@ -19,6 +20,7 @@ export function useActivityView(session: SessionResponse | null, credential: str
     if (!session) { setView(null); setError(''); return; }
     let alive = true;
     let version: number | undefined;
+    let groupId: string | undefined;
     let request: AbortController | undefined;
     let wake: (() => void) | undefined;
     let retryNow = false;
@@ -31,7 +33,8 @@ export function useActivityView(session: SessionResponse | null, credential: str
         request = controller;
         try {
           const full = version === undefined;
-          const response = await fetch(`/api/view${full ? '' : `?after=${version}`}`, {
+          const group = groupId ? '&group=' + encodeURIComponent(groupId) : '';
+          const response = await fetch(`/api/view${full ? '' : `?after=${version}${group}`}`, {
             headers: activityHeaders(session!, credential), signal: controller.signal,
           });
           if (!alive) return;
@@ -46,8 +49,9 @@ export function useActivityView(session: SessionResponse | null, credential: str
             || !['idle', 'preparing', 'active', 'reviewing', 'ended'].includes(body.phase)
             || (body.roundId !== null && typeof body.roundId !== 'string')
             || !Array.isArray(body.closedRoundIds)) throw new Error();
-          setView(body as ActivityView); setError('');
+          setView({ ...body, sampledAt: Date.now() }); setError('');
           version = body.version;
+          groupId = body.groupId;
           retryNow = false;
           if (full) {
             setFullSnapshot(value => value + 1);

@@ -108,8 +108,8 @@ export function updateQuestionCard(activity: Activity, id: string, input: unknow
       throw new DomainError(422, 'INVALID_PROMPT', `${label}輸入完整題幹。`);
     }
     const acceptedAnswers = typeof acceptedAnswersText === 'string' ? normalizeAcceptedAnswers(acceptedAnswersText) : [];
-    if (!acceptedAnswers.length) {
-      throw new DomainError(422, 'INVALID_ACCEPTED_ANSWERS', `${label}填寫至少一個標準答案，一行一種答案。`);
+    if (acceptedAnswersText !== undefined && typeof acceptedAnswersText !== "string") {
+      throw new DomainError(422, 'INVALID_ACCEPTED_ANSWERS', `${label}以文字填寫標準答案，一行一種答案。`);
     }
     if (prompt === question.prompt && !question.missingPrompt
       && acceptedAnswers.length === question.acceptedAnswers.length
@@ -136,7 +136,7 @@ export function addManualQuestion(activity: Activity, input: unknown): RoundQues
   if (!hasPrompt(unitId, prompt)) throw new DomainError(422, 'INVALID_PROMPT', '請填寫完整題幹。');
   const acceptedAnswers = typeof acceptedAnswersText === 'string'
     ? normalizeAcceptedAnswers(acceptedAnswersText) : [];
-  if (!acceptedAnswers.length) throw new DomainError(422, 'INVALID_ACCEPTED_ANSWERS', '請填寫至少一個標準答案，一行一種答案。');
+  if (acceptedAnswersText !== undefined && typeof acceptedAnswersText !== "string") throw new DomainError(422, 'INVALID_ACCEPTED_ANSWERS', '請以文字填寫標準答案，一行一種答案。');
   const question: RoundQuestion = {
     questionId: unitId, prompt, unitId, origin: 'manual', questionKey: randomUUID(),
     missingPrompt: false, acceptedAnswers, questionRevision: 0,

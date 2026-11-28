@@ -1,0 +1,18 @@
+@startuml
+skinparam defaultFontName Microsoft JhengHei
+class 教師
+class 教室
+class 活動
+class 組別
+class 成員
+class 回合
+class 題目
+class 補答
+教師 "1" -- "*" 教室
+教室 -- 活動
+活動 -- 組別
+組別 "1" -- "*" 成員 : 目前所屬
+活動 -- 回合
+回合 -- 題目
+題目 -- "0..1" 補答
+@enduml

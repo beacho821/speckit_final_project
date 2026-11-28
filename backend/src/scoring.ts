@@ -32,7 +32,8 @@ export function activityStandings(activity: Activity): ActivitySettlement {
     }
   }
 
-  const sorted = activity.groups.map(group => ({ id: group.id, name: group.name, points: points.get(group.id) ?? 0 }))
+  const eligible = activity.settlementPublished ? activity.groups.slice(0, activity.settlementGroupCount) : activity.groups;
+  const sorted = eligible.map(group => ({ id: group.id, name: group.name, points: points.get(group.id) ?? 0 }))
     .sort((a, b) => b.points - a.points);
   let rank = 0;
   const groups = sorted.map((group, index) => {
