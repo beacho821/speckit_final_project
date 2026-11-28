@@ -58,6 +58,7 @@ describe('授權畫面同步整合', () => {
         const resultsResponse = await c.request(`/rounds/${round.id}/results`, students[0].headers);
         expect(resultsResponse.status).toBe(403);
 
+        clock += startedViews[winnerIndex + 1].value.waitRemainingMs;
         const startSubmission = Date.now();
         const accepted = await c.request(`/rounds/${round.id}/submissions`, students[winnerIndex].headers,
           { answers: unit.questionIds.map(questionId => ({ questionId, text: `第 ${roundIndex + 1} 回合答案 ${questionId}` })) }, 'POST');

@@ -15,6 +15,25 @@ it('顯示我的教室及空狀態，建立後前往新教室', async () => {
   expect(open).toHaveBeenCalledWith('新教室');
 });
 
+it('依實際回合狀態篩選並在刪除後更新數量和空狀態', async () => {
+  const rows = ['preparing', 'active', 'reviewing', 'ended', 'idle'].map(phase => ({ id: phase, name: phase, phase, updatedAt: 0 }));
+  vi.stubGlobal('fetch', vi.fn(async (_url, options) => options?.method === 'DELETE'
+    ? new Response(null, { status: 204 }) : Response.json([...rows, { ...rows[4], id: 'offline', unavailable: true }])));
+  await render(<ClassroomList credential="測試密碼" onOpen={() => {}} onExpired={() => {}} />);
+  await flush();
+  const names = () => [...host.querySelectorAll('.room-card h3')].map(title => title.textContent);
+  await click('進行中 3');
+  expect(names()).toEqual(['preparing', 'active', 'reviewing']);
+  await click('已定案 1');
+  expect(names()).toEqual(['ended']);
+  await click('刪除教室');
+  await click('確認刪除');
+  await flush();
+  expect(host.textContent).toContain('目前沒有符合此狀態的教室。');
+  await click('全部 5');
+  expect(names()).toHaveLength(5);
+});
+
 it.each([
   [() => Promise.reject(new TypeError('Failed to fetch')), '教室清單載入失敗，請確認連線後重新載入。'],
   [async () => Response.json({ status: 'unexpected' }), '教室清單載入失敗，請確認連線後重新載入。'],

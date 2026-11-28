@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 
-export interface AppConfig { teacherPassword: string; googleServiceAccount?: Record<string, unknown>; port: number; host?: string }
+export interface AppConfig { teacherPassword: string; teacherUsername?: string; teacherDisplayName?: string; googleServiceAccount?: Record<string, unknown>; port: number; host?: string }
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -28,5 +28,6 @@ export function loadConfig(): AppConfig {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT 必須為 1 至 65535 的整數，請修正環境設定。');
   const host = process.env.HOST?.trim();
   if (host && host !== 'localhost' && !isIP(host)) throw new Error('HOST 須為有效 IP 位址或 localhost，請修正環境設定。');
-  return { teacherPassword, googleServiceAccount, port, ...(host ? { host } : {}) };
+  return { ...(process.env.TEACHER_USERNAME?.trim() ? { teacherUsername: process.env.TEACHER_USERNAME.trim() } : {}),
+    teacherDisplayName: process.env.TEACHER_DISPLAY_NAME?.trim(), teacherPassword, googleServiceAccount, port, ...(host ? { host } : {}) };
 }

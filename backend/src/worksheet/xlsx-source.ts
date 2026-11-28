@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import {DomainError} from '../rounds.js';
 import {identifyWorksheet} from './identify.js';
@@ -15,9 +16,9 @@ export async function importXlsxWorksheet(bytes:Buffer,inputName:unknown,sheetId
   if(sheetId!==undefined&&(!Number.isSafeInteger(sheetId)||sheetId<1))throw new DomainError(422,'INVALID_SHEET_ID','請選擇有效的工作表。');
   const book=new ExcelJS.Workbook();try{await book.xlsx.load(bytes as never);}catch{throw new DomainError(422,'INVALID_XLSX','無法讀取 XLSX，請確認檔案未損毀或加密。');}
   const visible=book.worksheets.filter(s=>s.state==='visible');
-  if(sheetId!==undefined){const sheet=visible.find(s=>s.id===sheetId);if(!sheet)throw new DomainError(422,'SHEET_NOT_FOUND','所選工作表不存在或已隱藏，請重新選擇。');return {worksheet:{source:{kind:'xlsx',fileName,sheetId:sheet.id,sheetTitle:sheet.name,importedAt:Date.now()},...identifyWorksheet(sheet)}};}
+  if(sheetId!==undefined){const sheet=visible.find(s=>s.id===sheetId);if(!sheet)throw new DomainError(422,'SHEET_NOT_FOUND','所選工作表不存在或已隱藏，請重新選擇。');return {worksheet:{originalDigest:createHash('sha256').update(bytes).digest('hex'),source:{kind:'xlsx',fileName,sheetId:sheet.id,sheetTitle:sheet.name,importedAt:Date.now()},...identifyWorksheet(sheet)}};}
   const valid=visible.flatMap(sheet=>{try{return [{sheet,identified:identifyWorksheet(sheet)}];}catch(error){if(error instanceof DomainError)return [];throw error;}});
   if(!valid.length){if(visible.length===1)identifyWorksheet(visible[0]);throw new DomainError(422,'NO_FILL_BLANKS','找不到可辨識的學習單，請確認題號與作答欄位。');}
   if(valid.length>1)return {candidates:valid.map(({sheet})=>({sheetId:sheet.id,title:sheet.name}))};
-  const {sheet,identified}=valid[0];return {worksheet:{source:{kind:'xlsx',fileName,sheetId:sheet.id,sheetTitle:sheet.name,importedAt:Date.now()},...identified}};
+  const {sheet,identified}=valid[0];return {worksheet:{originalDigest:createHash('sha256').update(bytes).digest('hex'),source:{kind:'xlsx',fileName,sheetId:sheet.id,sheetTitle:sheet.name,importedAt:Date.now()},...identified}};
 }

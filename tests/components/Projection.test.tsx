@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
 import { ProjectionDisplay } from '../../frontend/src/Projection';
-import { render, host } from '../helpers/ui';
+import { render, host, click } from '../helpers/ui';
 
 it('全班投影呈現公開的題目、組名與收件狀態', async () => {
   await render(<ProjectionDisplay view={{ classroomName: '測試教室', phase: 'active', title: '第一題',
@@ -24,8 +24,10 @@ it('公布結算後顯示前三名，第三名同分並列', async () => {
       { id: 'd', name: '丁組', rank: 3, points: 3 },
       { id: 'e', name: '戊組', rank: 5, points: 0 },
     ] } }} />);
-  expect([...host.querySelectorAll('.settlement-top li strong')].map(element => element.textContent))
-    .toEqual(['甲組', '乙組', '丙組', '丁組']);
+  await click('略過動畫');
+  expect([...host.querySelectorAll('.award-slot[data-rank="3"] li strong')].map(element => element.textContent))
+    .toEqual(['丙組', '丁組']);
+  expect(host.querySelectorAll('.award-step li')).toHaveLength(4);
   expect(host.textContent).toContain('第 5 名戊組0 分');
   expect(host.textContent).not.toContain('即時排名');
 });
@@ -42,6 +44,9 @@ it('定案後在各小題下方顯示正解，準備下一回合時清除', asyn
   expect(host.querySelector('.projection-answer')).toBeNull();
   await render(<ProjectionDisplay view={{ ...view, phase: 'ended', version: 2 }} />);
   const answers = [...host.querySelectorAll('.projection-answer')];
+  const group = host.querySelector('.projection-question[data-grouped="true"]');
+  expect(group?.querySelector('.question-kind')?.textContent).toContain('2 小題');
+  expect(group?.querySelectorAll('.question-block')).toHaveLength(2);
   expect(answers.map(answer => answer.querySelector('span')?.textContent)).toEqual(['第一部分答案\n補充說明', '第二部分答案']);
   expect(answers[1].previousElementSibling?.textContent).toContain('第 1 題，第 2 部分');
   await render(<ProjectionDisplay view={{ ...view, questions: [], phase: 'preparing', version: 3 }} />);

@@ -87,3 +87,24 @@ it('兩組四筆作答只改指定判分，補答依更正和資格即時更新'
     reviewRevision: 0, grades: [{ groupId: 'g', questionId: '原2', correct: true }],
   }, 'PATCH', expect.any(AbortSignal));
 });
+
+it('新版回合預設留白，僅把勾選的子題補答送入定案', async () => {
+  const action = vi.fn<ReviewAction>().mockResolvedValue({ kind: 'ok', data: { id: 'r', phase: 'ended', winnerGroupId: null } });
+  await render(<RoundReview roundPath="/api/rounds/r" questions={questions} groups={[]} review={{ ...review(), optionalSupplements: true }} disabled={false} action={action} classMode />);
+  const options = host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  expect(options).toHaveLength(2);
+  expect([...options].every(item => !item.checked)).toBe(true);
+  await act(async () => options[1].click());
+  expect(host.querySelector('textarea')?.value).toBe('第二題標準答案');
+  await click('確認定案');
+  expect(action).toHaveBeenCalledWith('/api/rounds/r/publish', { reviewRevision: 0, supplements: [{ questionId: '原2', text: '第二題標準答案' }] }, 'POST', expect.any(AbortSignal));
+});
+
+it('待教師判分時未選任何按鈕，明確判錯亦可儲存', async () => {
+  const action = vi.fn<ReviewAction>().mockResolvedValue({ kind: 'ok', data: { reviewRevision: 1 } });
+  await render(<RoundReview roundPath="/api/rounds/r" questions={[questions[0]]} groups={[{ id: 'g', name: '甲組', received: true, answers: [{questionId: '原1', text: '作答'}] }]} review={{ ...review(), optionalSupplements: true }} disabled={false} action={action} classMode />);
+  expect(host.querySelector('.review-grade [aria-pressed="true"]')).toBeNull();
+  expect(button('確認定案').disabled).toBe(true);
+  await click('錯誤'); await click('儲存判分');
+  expect(action).toHaveBeenCalledWith('/api/rounds/r/review', { reviewRevision: 0, grades: [{ groupId: 'g', questionId: '原1', correct: false }] }, 'PATCH', expect.any(AbortSignal));
+});

@@ -80,7 +80,7 @@ it('只有無組答對的子題需要補答，晚到的送答不會改變判分'
   expect(reviewFor(round).supplements).toEqual([{ questionId: '1（2）', text: '中央處理器' }]);
   expect(reviewFor(round).supplementCandidates).toHaveLength(2);
   expect(() => submitAnswers(activity, round.id, 'b', [], 1)).toThrow('已停止收件');
-  expect(publishRound(activity, round.id, 0)).toMatchObject({ phase: 'ended', winnerGroupId: null });
+  expect(publishRound(activity, round.id, 0, reviewFor(round).supplements)).toMatchObject({ phase: 'ended', winnerGroupId: null });
   expect(round.supplements).toEqual([{ questionId: '1（2）', text: '中央處理器' }]);
 });
 
@@ -93,7 +93,7 @@ it('無人送答且一題無可引用來源時仍可定案，保留第一個有�
   expect(reviewFor(round)).toMatchObject({
     supplements: [{ questionId: '1（1）', text: '  標準答案  ' }], missingSupplementQuestionIds: ['1（2）'],
   });
-  publishRound(activity, round.id, 0);
+  publishRound(activity, round.id, 0, reviewFor(round).supplements);
   expect(round.supplements).toEqual([{ questionId: '1（1）', text: '  標準答案  ' }]);
 });
 
@@ -102,6 +102,7 @@ it('舊人工補答優先，改判或取消資格後依有效判分重算，定�
   startRound(activity, round.id, 0);
   submitAnswers(activity, round.id, 'a', [{ questionId: '1（1）', text: 'CPU' }, { questionId: '1（2）', text: '合理答案' }], 0);
   endRound(activity, round.id);
+  delete round.optionalSupplements;
   const legacy = { questionId: '1（2）', text: '  已存人工原文  ' };
   round.supplements = [legacy];
   const grade = { groupId: 'a', questionId: '1（2）', correct: true };
@@ -125,6 +126,7 @@ it('同一筆改回錯誤後恢復舊人工補答原文，只封存仍欠答的�
   const second = { questionId: '1（2）', text: '同義原答' };
   submitAnswers(activity, round.id, 'a', [first, second], 0);
   endRound(activity, round.id);
+  delete round.optionalSupplements;
   const legacy = { questionId: second.questionId, text: '  舊人工補答\n原文  ' };
   round.supplements = [{ questionId: first.questionId, text: '另一筆舊補答' }, legacy];
   expect(reviewFor(round).supplements).toEqual([legacy]);

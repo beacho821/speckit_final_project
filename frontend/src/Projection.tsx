@@ -3,8 +3,10 @@ import type { ClassroomLocation, GroupStanding, ProjectionView } from '../../sha
 import { activityHeaders, basicHeader, readError } from './api';
 import { questionLabel } from './question-label';
 import { phaseLabels } from './ClassroomList';
+import { hasQuestionParts, QuestionKind } from './QuestionKind';
 import Settlement from './Settlement';
 import Standings from './Standings';
+import SubmissionAvailability, { type TimedSnapshot } from './SubmissionAvailability';
 
 const messageType = 'classroom-projection';
 const readyType = 'classroom-projection-ready';
@@ -16,8 +18,8 @@ const sourceProbeMs = 5_000;
 type TerminalState = 'reopen' | 'unauthorized';
 type ProjectionState =
   | { kind: 'waiting' | TerminalState }
-  | { kind: 'live'; view: ProjectionView }
-  | { kind: 'reconnecting'; view: ProjectionView | null; expiresAt: number };
+  | { kind: 'live'; view: TimedSnapshot<ProjectionView> }
+  | { kind: 'reconnecting'; view: TimedSnapshot<ProjectionView> | null; expiresAt: number };
 type ProjectionWindow = { window: Window; send: () => void; stop: (reason: TerminalState) => void };
 
 class ProjectionError extends Error {
@@ -195,7 +197,7 @@ export function useOpenProjection(credential: string, authorized: boolean) {
           if (!running || attempt.signal.aborted) continue;
           if (next === null && suffix) continue;
           if (!isProjectionView(next)) throw new Error();
-          state = { kind: 'live', view: next };
+          state = { kind: 'live', view: next.phase === 'active' ? { ...next, sampledAt: Date.now() } : next };
           delay = 500;
           send();
         } catch (error) {
@@ -292,21 +294,23 @@ function ProjectionPrompt({ kind }: { kind: Exclude<ProjectionState['kind'], 'li
     reopen: '請從教室導覽重新選擇「開啟教室投影」。',
     unauthorized: '請登入教師端，從教室導覽選擇「開啟教室投影」。',
   };
-  return <main className="projection-screen">
+  return <main className="projection-screen projection-prompt">
     <h1>教室投影</h1><p role="status">{instructions[kind]}</p>
   </main>;
 }
 
-export function ProjectionDisplay({ view, reconnecting = false }: { view: ProjectionView; reconnecting?: boolean }) {
+export function ProjectionDisplay({ view, reconnecting = false }: { view: TimedSnapshot<ProjectionView>; reconnecting?: boolean }) {
+  const grouped = hasQuestionParts(view.questions);
   return <main className="projection-screen">
     <header className="projection-header"><div><h1>{view.classroomName}</h1></div>
       <p className="projection-phase" role="status">{view.settlement ? '結算已公布' : phaseLabels[view.phase]}</p></header>
     {reconnecting && <p role="status">重新連線中…</p>}
     {view.settlement ? <Settlement settlement={view.settlement} /> : <div className="projection-grid">
-      <section className="projection-question">
-        {view.questions.length ? <><h2>{view.questions[0].questionNumber === undefined ? view.title ?? '目前題目' : questionLabel({ questionNumber: view.questions[0].questionNumber })}</h2>
-          {view.questions.map(question => <div key={question.questionId}>
-            <p>{(question.partNumber != null || (question.questionNumber === undefined && (view.questions.length > 1 || view.title !== question.questionId))) && <><b>{questionLabel(question)}</b>{' '}</>}{question.prompt}</p>
+      <section className="projection-question" data-grouped={grouped}>
+        {view.questions.length ? <><div className="unit-heading"><h2>{view.questions[0].questionNumber === undefined ? view.title ?? '目前題目' : questionLabel({ questionNumber: view.questions[0].questionNumber })}</h2>
+          <QuestionKind grouped={grouped} count={view.questions.length} /></div>
+          {view.questions.map(question => <div className="question-block" key={question.questionId}>
+            <p>{(question.partNumber != null || (question.questionNumber === undefined && (view.questions.length > 1 || view.title !== question.questionId))) && <b className="part-label">{questionLabel(question)}</b>}{question.prompt}</p>
             {view.phase === 'ended' && <p className="projection-answer">
               <strong>正確答案</strong><span>{question.publishedAnswer?.trim() ? question.publishedAnswer : '未提供'}</span>
             </p>}
@@ -316,11 +320,13 @@ export function ProjectionDisplay({ view, reconnecting = false }: { view: Projec
       </section>
       {view.standings ? <aside aria-labelledby="projection-standings-title">
         <h2 id="projection-standings-title">即時排名</h2>
-        {view.standings.length ? <Standings groups={view.standings}
+        {view.standings.length ? <Standings groups={view.standings} sampledAt={view.sampledAt}
+          waits={view.phase === 'active' ? new Map(view.groups.map(group => [group.id, group.waitRemainingMs])) : undefined}
           receivedByGroup={view.phase === 'active' || view.phase === 'reviewing'
             ? new Set(view.groups.filter(group => group.received).map(group => group.id)) : undefined} />
           : <p className="projection-phase">尚無組別</p>}
-      </aside> : <aside><h2>收件狀態</h2><ul>{view.groups.map(group => <li key={group.id}><strong>{group.name}</strong><span>{group.received ? '已送出' : '尚未送出'}</span></li>)}</ul></aside>}
+      </aside> : <aside><h2>收件狀態</h2><ul>{view.groups.map(group => <li key={group.id}><strong>{group.name}</strong><span>{group.received ? '已送出'
+        : <SubmissionAvailability waitMs={group.waitRemainingMs} sampledAt={view.sampledAt} />}</span></li>)}</ul></aside>}
     </div>}
   </main>;
 }
